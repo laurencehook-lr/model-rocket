@@ -41,6 +41,12 @@ jobs:
       - uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9 # v2
         with:
           tool: cargo-nextest@0.9.132,just
+      - name: Install pinned Codex CLI
+        run: npm install --global @openai/codex@0.146.0
+      - name: Create managed-auth test fixture
+        run: |
+          install -d -m 700 "$HOME/.codex"
+          install -m 600 /dev/null "$HOME/.codex/auth.json"
       - run: just nextest
       - run: just security-test
 

@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ -n "${ANTHROPIC_API_KEY:-}" || -n "${ANTHROPIC_AUTH_TOKEN:-}" ]]; then
+  echo "Claude inherited an API-key variable" >&2
+  exit 74
+fi
+if [[ -n "${CLAUDE_CODE_USE_BEDROCK:-}" || -n "${CLAUDE_CODE_USE_VERTEX:-}" || -n "${CLAUDE_CODE_USE_FOUNDRY:-}" ]]; then
+  echo "Claude inherited an alternate-provider selector" >&2
+  exit 77
+fi
+if [[ "${ANTHROPIC_CUSTOM_HEADERS:-}" != x-model-rocket-token:* ]]; then
+  echo "Claude did not receive the local router token" >&2
+  exit 75
+fi
+if [[ "${ANTHROPIC_BASE_URL:-}" != http://127.0.0.1:* ]]; then
+  echo "Claude did not receive a loopback router URL" >&2
+  exit 76
+fi
+if [[ "${ANTHROPIC_CUSTOM_MODEL_OPTION:-}" != "gpt-5.6-sol" ]]; then
+  echo "Claude did not receive the GPT custom model" >&2
+  exit 78
+fi
+if [[ " $* " != *" --model claude-fable-5 "* ]]; then
+  echo "Claude did not start with Fable as the lead model" >&2
+  exit 79
+fi
+printf '%s\n' "launcher environment isolated" >"$LAUNCHER_PROOF_FILE"

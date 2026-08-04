@@ -42,16 +42,15 @@ ln -s "$PWD/scripts/model-rocket" "$HOME/.local/bin/model-rocket"
 Run `/model` inside that Claude Code process to switch between available Anthropic models and `gpt-5.6-sol`.
 All normal Claude Code tools, hooks, skills, MCP servers, and permission handling remain in the Claude Code process.
 
-To make the normal `claude` command use the router in Zsh, add this line once to `~/.zshrc`, then open a new shell:
-
-```shell
-alias claude='model-rocket'
-```
-
-Run `claude`, then use `/model` to switch providers in the same session.
-Use `\claude` when you explicitly need Claude Code without Model Rocket.
-To remove the integration, delete the alias line from `~/.zshrc`.
 The router starts with Fable by default.
+
+### Migrating from Clodex
+
+Clodex short model aliases such as `sol` are not Model Rocket model identifiers.
+If `~/.claude/settings.json` still contains `"model": "sol"`, replace it with `"model": "claude-fable-5"` before starting Model Rocket.
+Sessions created with the old alias retain `sol` in their transcript and must not be resumed through Model Rocket.
+Start a new Model Rocket session and select the exact `gpt-5.6-sol` custom model through `/model`.
+
 Install the optional user-level worker once:
 
 ```bash

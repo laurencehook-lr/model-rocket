@@ -42,9 +42,8 @@ fn request_for_session(
 ) -> Result<Request<Body>, axum::http::Error> {
     Request::builder()
         .method("POST")
-        .uri("/v1/messages")
+        .uri(format!("/{BEARER}/v1/messages"))
         .header(header::CONTENT_TYPE, "application/json")
-        .header("x-model-rocket-token", BEARER)
         .header("x-claude-code-session-id", session_id)
         .body(Body::from(body.to_string()))
 }
@@ -292,9 +291,8 @@ async fn wrong_bearer_is_rejected_before_app_server_work() -> Result<(), Box<dyn
     let app = http::router(Bridge::new(config()?))?;
     let request = Request::builder()
         .method("POST")
-        .uri("/v1/messages")
+        .uri("/wrong/v1/messages")
         .header(header::CONTENT_TYPE, "application/json")
-        .header("x-model-rocket-token", "wrong")
         .body(Body::from("{}"))?;
     let response = app.oneshot(request).await?;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
@@ -306,9 +304,8 @@ async fn body_above_eight_mib_is_rejected() -> Result<(), Box<dyn std::error::Er
     let app = http::router(Bridge::new(config()?))?;
     let request = Request::builder()
         .method("POST")
-        .uri("/v1/messages")
+        .uri(format!("/{BEARER}/v1/messages"))
         .header(header::CONTENT_TYPE, "application/json")
-        .header("x-model-rocket-token", BEARER)
         .body(Body::from(vec![b'a'; 8 * 1024 * 1024 + 1]))?;
     let response = app.oneshot(request).await?;
     assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
@@ -352,8 +349,7 @@ async fn configured_gpt_model_has_model_metadata() -> Result<(), Box<dyn std::er
     let app = http::router(Bridge::new(config()?))?;
     let request = Request::builder()
         .method("GET")
-        .uri("/v1/models/gpt-5.6-sol")
-        .header("x-model-rocket-token", BEARER)
+        .uri(format!("/{BEARER}/v1/models/gpt-5.6-sol"))
         .body(Body::empty())?;
     let response = app.oneshot(request).await?;
     assert_eq!(response.status(), StatusCode::OK);

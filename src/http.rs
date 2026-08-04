@@ -23,7 +23,11 @@ use crate::{
 
 const MAX_REQUEST_BYTES: usize = 8 * 1024 * 1024;
 const MAX_NON_STREAM_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
-const LOCAL_AUTH_HEADER: &str = "x-model-rocket-token";
+const HEALTH_ROUTE: &str = "/healthz";
+const MESSAGES_ROUTE: &str = "/{token}/v1/messages";
+const MODELS_ROUTE: &str = "/{token}/v1/models";
+const MODEL_ROUTE: &str = "/{token}/v1/models/{model}";
+const LEGACY_LOCAL_AUTH_HEADER: &str = "x-model-rocket-token";
 const CLAUDE_SESSION_HEADER: &str = "x-claude-code-session-id";
 const ANTHROPIC_BASE_URL: &str = "https://api.anthropic.com/";
 
@@ -64,10 +68,10 @@ pub fn router(bridge: Bridge) -> Result<Router, BridgeError> {
 
 fn routes(state: HttpState) -> Router {
     Router::new()
-        .route("/healthz", get(health))
-        .route("/v1/messages", post(messages))
-        .route("/v1/models", get(models))
-        .route("/v1/models/{model}", get(model))
+        .route(HEALTH_ROUTE, get(health))
+        .route(MESSAGES_ROUTE, post(messages))
+        .route(MODELS_ROUTE, get(models))
+        .route(MODEL_ROUTE, get(model))
         .layer(DefaultBodyLimit::max(MAX_REQUEST_BYTES))
         .with_state(Arc::new(state))
 }
@@ -76,15 +80,23 @@ async fn health() -> StatusCode {
     StatusCode::NO_CONTENT
 }
 
-async fn messages(State(state): State<Arc<HttpState>>, request: Request) -> Response {
-    match messages_inner(&state, request).await {
+async fn messages(
+    State(state): State<Arc<HttpState>>,
+    Path(token): Path<String>,
+    request: Request,
+) -> Response {
+    match messages_inner(&state, &token, request).await {
         Ok(response) => response,
         Err(error) => error.into_response(),
     }
 }
 
-async fn messages_inner(state: &HttpState, request: Request) -> Result<Response, BridgeError> {
-    authenticate(request.headers(), &state.bridge.config().bearer)?;
+async fn messages_inner(
+    state: &HttpState,
+    token: &str,
+    request: Request,
+) -> Result<Response, BridgeError> {
+    authenticate(token, &state.bridge.config().bearer)?;
     let (parts, body) = request.into_parts();
     let body = to_bytes(body, MAX_REQUEST_BYTES)
         .await
@@ -160,11 +172,7 @@ async fn gpt_messages(
     assistant_message(&model, delta_rx, outcome_rx).await
 }
 
-fn authenticate(headers: &HeaderMap, expected: &str) -> Result<(), BridgeError> {
-    let candidate = headers
-        .get(LOCAL_AUTH_HEADER)
-        .and_then(|value| value.to_str().ok());
-    let candidate = candidate.ok_or(BridgeError::Authentication)?;
+fn authenticate(candidate: &str, expected: &str) -> Result<(), BridgeError> {
     let expected_digest = Sha256::digest(expected.as_bytes());
     let candidate_digest = Sha256::digest(candidate.as_bytes());
     let matches: bool = expected_digest.ct_eq(&candidate_digest).into();
@@ -175,15 +183,23 @@ fn authenticate(headers: &HeaderMap, expected: &str) -> Result<(), BridgeError> 
     }
 }
 
-async fn models(State(state): State<Arc<HttpState>>, request: Request) -> Response {
-    match models_inner(&state, request).await {
+async fn models(
+    State(state): State<Arc<HttpState>>,
+    Path(token): Path<String>,
+    request: Request,
+) -> Response {
+    match models_inner(&state, &token, request).await {
         Ok(response) => response,
         Err(error) => error.into_response(),
     }
 }
 
-async fn models_inner(state: &HttpState, request: Request) -> Result<Response, BridgeError> {
-    authenticate(request.headers(), &state.bridge.config().bearer)?;
+async fn models_inner(
+    state: &HttpState,
+    token: &str,
+    request: Request,
+) -> Result<Response, BridgeError> {
+    authenticate(token, &state.bridge.config().bearer)?;
     require_anthropic_oauth(request.headers())?;
     proxy(
         state,
@@ -198,10 +214,10 @@ async fn models_inner(state: &HttpState, request: Request) -> Result<Response, B
 
 async fn model(
     State(state): State<Arc<HttpState>>,
-    Path(model): Path<String>,
+    Path((token, model)): Path<(String, String)>,
     request: Request,
 ) -> Response {
-    match model_inner(&state, &model, request).await {
+    match model_inner(&state, &token, &model, request).await {
         Ok(response) => response,
         Err(error) => error.into_response(),
     }
@@ -209,10 +225,11 @@ async fn model(
 
 async fn model_inner(
     state: &HttpState,
+    token: &str,
     model: &str,
     request: Request,
 ) -> Result<Response, BridgeError> {
-    authenticate(request.headers(), &state.bridge.config().bearer)?;
+    authenticate(token, &state.bridge.config().bearer)?;
     if model == state.bridge.config().model {
         return serde_json::to_vec(&local_model(model))
             .map(|body| json_response(StatusCode::OK, body))
@@ -317,7 +334,7 @@ fn forward_request_header(name: &HeaderName) -> bool {
         && name != header::CONTENT_LENGTH
         && name != header::CONNECTION
         && name != header::TRANSFER_ENCODING
-        && name.as_str() != LOCAL_AUTH_HEADER
+        && name.as_str() != LEGACY_LOCAL_AUTH_HEADER
         && name.as_str() != "x-api-key"
         && name.as_str() != "proxy-authorization"
         && name.as_str() != "proxy-authenticate"
@@ -646,7 +663,7 @@ fn sse_event(name: &'static str, value: Value) -> Result<Event, BridgeError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        AssistantOutcome, CLAUDE_SESSION_HEADER, HttpState, LOCAL_AUTH_HEADER,
+        AssistantOutcome, CLAUDE_SESSION_HEADER, HttpState, LEGACY_LOCAL_AUTH_HEADER,
         MAX_NON_STREAM_RESPONSE_BYTES, assistant_message, authenticate, require_anthropic_oauth,
         routes, terminal_events,
     };
@@ -666,14 +683,12 @@ mod tests {
     const TEST_TOKEN: &str = "01234567890123456789012345678901";
 
     #[test]
-    fn local_authentication_accepts_matching_custom_header()
-    -> Result<(), Box<dyn std::error::Error>> {
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            LOCAL_AUTH_HEADER,
-            HeaderValue::from_static("01234567890123456789012345678901"),
-        );
-        authenticate(&headers, "01234567890123456789012345678901")?;
+    fn local_authentication_accepts_matching_path_token() -> Result<(), Box<dyn std::error::Error>>
+    {
+        authenticate(
+            "01234567890123456789012345678901",
+            "01234567890123456789012345678901",
+        )?;
         Ok(())
     }
 
@@ -692,13 +707,8 @@ mod tests {
     }
 
     #[test]
-    fn local_authentication_does_not_use_vendor_authorization() {
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            header::AUTHORIZATION,
-            HeaderValue::from_static("Bearer 01234567890123456789012345678901"),
-        );
-        assert!(authenticate(&headers, "01234567890123456789012345678901").is_err());
+    fn local_authentication_rejects_wrong_path_token() {
+        assert!(authenticate("wrong", "01234567890123456789012345678901").is_err());
     }
 
     #[test]
@@ -793,7 +803,7 @@ mod tests {
             headers.get(header::AUTHORIZATION),
             Some(&HeaderValue::from_static("Bearer anthropic-subscription"))
         );
-        assert!(!headers.contains_key(LOCAL_AUTH_HEADER));
+        assert!(!headers.contains_key(LEGACY_LOCAL_AUTH_HEADER));
         assert!(!headers.contains_key("x-api-key"));
         let document: serde_json::Value = match serde_json::from_slice(&body) {
             Ok(document) => document,
@@ -815,7 +825,7 @@ mod tests {
             headers.get(header::AUTHORIZATION),
             Some(&HeaderValue::from_static("Bearer anthropic-subscription"))
         );
-        assert!(!headers.contains_key(LOCAL_AUTH_HEADER));
+        assert!(!headers.contains_key(LEGACY_LOCAL_AUTH_HEADER));
         Json(serde_json::json!({
             "data": [{
                 "id": "claude-fable-5",
@@ -879,9 +889,9 @@ mod tests {
         let (app, task) = test_router().await?;
         let request = Request::builder()
             .method("POST")
-            .uri("/v1/messages?beta=true")
+            .uri(format!("/{TEST_TOKEN}/v1/messages?beta=true"))
             .header(header::CONTENT_TYPE, "application/json")
-            .header(LOCAL_AUTH_HEADER, TEST_TOKEN)
+            .header(LEGACY_LOCAL_AUTH_HEADER, "must-not-reach-upstream")
             .header(CLAUDE_SESSION_HEADER, "claude-session-1")
             .header(header::AUTHORIZATION, "Bearer anthropic-subscription")
             .body(Body::from(
@@ -906,8 +916,8 @@ mod tests {
         let (app, task) = test_router().await?;
         let request = Request::builder()
             .method("GET")
-            .uri("/v1/models")
-            .header(LOCAL_AUTH_HEADER, TEST_TOKEN)
+            .uri(format!("/{TEST_TOKEN}/v1/models"))
+            .header(LEGACY_LOCAL_AUTH_HEADER, "must-not-reach-upstream")
             .header(CLAUDE_SESSION_HEADER, "claude-session-1")
             .header(header::AUTHORIZATION, "Bearer anthropic-subscription")
             .body(Body::empty())?;
@@ -934,9 +944,9 @@ mod tests {
         for model in ["claude-fable-5", "gpt-5.6-sol", "claude-fable-5"] {
             let request = Request::builder()
                 .method("POST")
-                .uri("/v1/messages")
+                .uri(format!("/{TEST_TOKEN}/v1/messages"))
                 .header(header::CONTENT_TYPE, "application/json")
-                .header(LOCAL_AUTH_HEADER, TEST_TOKEN)
+                .header(LEGACY_LOCAL_AUTH_HEADER, "must-not-reach-upstream")
                 .header(CLAUDE_SESSION_HEADER, "claude-session-1")
                 .header(header::AUTHORIZATION, "Bearer anthropic-subscription")
                 .body(Body::from(
@@ -968,8 +978,8 @@ mod tests {
         let (app, task) = test_router().await?;
         let request = Request::builder()
             .method("GET")
-            .uri("/v1/models/claude-redirect")
-            .header(LOCAL_AUTH_HEADER, TEST_TOKEN)
+            .uri(format!("/{TEST_TOKEN}/v1/models/claude-redirect"))
+            .header(LEGACY_LOCAL_AUTH_HEADER, "must-not-reach-upstream")
             .header(CLAUDE_SESSION_HEADER, "claude-session-1")
             .header(header::AUTHORIZATION, "Bearer anthropic-subscription")
             .body(Body::empty())?;

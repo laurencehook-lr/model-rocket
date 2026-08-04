@@ -25,7 +25,7 @@ The bridge does not patch Claude Code, intercept TLS, install a CA, persist vend
 
 ## Use
 
-Requirements: Claude Code 2.1.221, Codex CLI 0.146.0 logged in with ChatGPT, Rust 1.94.1, `just`, `curl`, and `openssl`.
+Requirements: Claude Code 2.1.222, Codex CLI 0.146.0 logged in with ChatGPT, Rust 1.94.1, `just`, `curl`, and `openssl`.
 
 ```bash
 just preflight
@@ -38,9 +38,15 @@ For a user-wide command, put `scripts/model-rocket` on `PATH`:
 ln -s "$PWD/scripts/model-rocket" "$HOME/.local/bin/model-rocket"
 ```
 
-`scripts/model-rocket` starts the router on a free loopback port with a fresh local token, launches unmodified Claude Code, and stops the router when Claude exits.
+`scripts/model-rocket` starts the router on a free loopback port with a fresh local token, launches the pinned Claude Code binary directly, and stops the router when Claude exits.
+The direct binary path prevents terminal integrations such as cmux from replacing the router with their own `claude` command shim.
+The launcher defaults to `$HOME/.local/bin/claude`; set `MODEL_ROCKET_CLAUDE_BIN` to another absolute path if the official binary is installed elsewhere.
+The launcher supplies provider routing through a private launch-scoped settings file, rejects caller settings flags that could replace it, and removes the file when Claude exits.
+User, project, and local settings remain available for normal Claude Code features but cannot replace the route.
+Managed enterprise policy keeps its documented higher precedence; Model Rocket does not bypass administrator policy and is incompatible with a managed provider or proxy policy that replaces its loopback route or loopback proxy bypass.
 Run `/model` inside that Claude Code process to switch between available Anthropic models and `gpt-5.6-sol`.
 All normal Claude Code tools, hooks, skills, MCP servers, and permission handling remain in the Claude Code process.
+Claude Code is told that the custom GPT model has the current 272,000-token Sol context window.
 
 The router starts with Fable by default.
 

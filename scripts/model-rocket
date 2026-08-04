@@ -14,13 +14,26 @@ project_dir="$(cd "$script_dir/.." && pwd)"
 
 : "${MODEL_ROCKET_LISTEN:=127.0.0.1:0}"
 : "${MODEL_ROCKET_DEFAULT_MODEL:=claude-fable-5}"
+: "${MODEL_ROCKET_CLAUDE_BIN:=$HOME/.local/bin/claude}"
 gpt_model="gpt-5.6-sol"
+gpt_context_tokens="272000"
+required_claude_version="2.1.222 (Claude Code)"
 user_cwd="$PWD"
+
+for argument in "$@"; do
+  case "$argument" in
+  --settings | --settings=* | --setting-sources | --setting-sources=*)
+    echo "Claude Code routing option is managed by Model Rocket: $argument" >&2
+    exit 1
+    ;;
+  esac
+done
 
 bearer="$(openssl rand -hex 32)"
 
 log_file="$(mktemp -t model-rocket.XXXXXX.log)"
 ready_file="$(mktemp -t model-rocket.XXXXXX.ready)"
+routing_settings_file=""
 isolated_cwd=""
 if [[ -n "${MODEL_ROCKET_CWD:-}" ]]; then
   app_server_cwd="$MODEL_ROCKET_CWD"
@@ -55,6 +68,9 @@ cleanup() {
   fi
   rm -f "$log_file"
   rm -f "$ready_file"
+  if [[ -n "$routing_settings_file" ]]; then
+    rm -f "$routing_settings_file"
+  fi
   if [[ -n "$isolated_cwd" ]]; then
     rm -rf -- "$isolated_cwd"
   fi
@@ -74,6 +90,22 @@ fi
 
 if [[ ! -x "$bridge_bin" ]]; then
   echo "Bridge binary is not executable: $bridge_bin" >&2
+  exit 1
+fi
+
+if [[ "$MODEL_ROCKET_CLAUDE_BIN" != /* ]]; then
+  echo "Claude Code binary path must be absolute: $MODEL_ROCKET_CLAUDE_BIN" >&2
+  exit 1
+fi
+
+if [[ ! -x "$MODEL_ROCKET_CLAUDE_BIN" ]]; then
+  echo "Claude Code binary is not executable: $MODEL_ROCKET_CLAUDE_BIN" >&2
+  exit 1
+fi
+
+actual_claude_version="$("$MODEL_ROCKET_CLAUDE_BIN" --version)"
+if [[ "$actual_claude_version" != "$required_claude_version" ]]; then
+  echo "Claude Code version mismatch: expected $required_claude_version, got $actual_claude_version" >&2
   exit 1
 fi
 
@@ -111,18 +143,55 @@ if [[ ! -s "$ready_file" ]]; then
 fi
 
 listen_addr="$(<"$ready_file")"
-if ! curl --fail --silent --output /dev/null "http://${listen_addr}/healthz"; then
+if [[ "$listen_addr" == \[*\]:* ]]; then
+  listen_host="${listen_addr%%]*}"
+  listen_host="${listen_host#[}"
+  listen_proxy_host="[${listen_host}]"
+else
+  listen_host="${listen_addr%:*}"
+  listen_proxy_host="$listen_host"
+fi
+if ! curl --noproxy "$listen_host" --fail --silent --output /dev/null "http://${listen_addr}/healthz"; then
   cat "$log_file" >&2
   echo "Bridge did not become healthy at http://${listen_addr}." >&2
   exit 1
 fi
 
-env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
+proxy_bypass="localhost,127.0.0.1,::1,[::1],${listen_host},${listen_proxy_host}"
+if [[ -n "${NO_PROXY:-}" ]]; then
+  proxy_bypass+=",${NO_PROXY}"
+fi
+if [[ -n "${no_proxy:-}" ]]; then
+  proxy_bypass+=",${no_proxy}"
+fi
+if [[ ! "$proxy_bypass" =~ ^[][A-Za-z0-9.,:_*/%+-]+$ ]]; then
+  echo "NO_PROXY contains characters that cannot be represented safely in Claude settings." >&2
+  exit 1
+fi
+
+routing_settings_file="$(mktemp -t model-rocket.XXXXXX.settings.json)"
+chmod 600 "$routing_settings_file"
+printf '%s\n' \
+  '{' \
+  '  "env": {' \
+  "    \"ANTHROPIC_BASE_URL\": \"http://${listen_addr}/${bearer}\"," \
+  "    \"ANTHROPIC_CUSTOM_MODEL_OPTION\": \"${gpt_model}\"," \
+  '    "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME": "GPT through Codex subscription",' \
+  "    \"CLAUDE_CODE_MAX_CONTEXT_TOKENS\": \"${gpt_context_tokens}\"," \
+  "    \"NO_PROXY\": \"${proxy_bypass}\"," \
+  "    \"no_proxy\": \"${proxy_bypass}\"" \
+  '  }' \
+  '}' >"$routing_settings_file"
+
+env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_CUSTOM_HEADERS \
   -u CLAUDE_CODE_USE_BEDROCK \
   -u CLAUDE_CODE_USE_VERTEX \
   -u CLAUDE_CODE_USE_FOUNDRY \
-  ANTHROPIC_BASE_URL="http://${listen_addr}" \
-  ANTHROPIC_CUSTOM_HEADERS="x-model-rocket-token: $bearer" \
+  ANTHROPIC_BASE_URL="http://${listen_addr}/${bearer}" \
   ANTHROPIC_CUSTOM_MODEL_OPTION="$gpt_model" \
   ANTHROPIC_CUSTOM_MODEL_OPTION_NAME="GPT through Codex subscription" \
-  claude --model "$MODEL_ROCKET_DEFAULT_MODEL" --add-dir "$user_cwd" "$@"
+  CLAUDE_CODE_MAX_CONTEXT_TOKENS="$gpt_context_tokens" \
+  NO_PROXY="$proxy_bypass" \
+  no_proxy="$proxy_bypass" \
+  "$MODEL_ROCKET_CLAUDE_BIN" --model "$MODEL_ROCKET_DEFAULT_MODEL" --add-dir "$user_cwd" \
+    --settings "$routing_settings_file" "$@"

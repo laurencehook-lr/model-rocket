@@ -151,6 +151,34 @@ async fn non_stream_tool_request_returns_anthropic_json_without_fake_usage()
 }
 
 #[tokio::test]
+async fn reserved_mcp_tool_name_round_trips_through_safe_codex_alias()
+-> Result<(), Box<dyn std::error::Error>> {
+    let app = http::router(Bridge::new(config()?))?;
+    let response = app
+        .oneshot(request(&serde_json::json!({
+            "model": "gpt-5.6-sol",
+            "max_tokens": 100,
+            "stream": false,
+            "messages": [{"role": "user", "content": "CALL_TOOL"}],
+            "tools": [{
+                "name": "mcp__plugin_context7_context7__query-docs",
+                "description": "Query documentation",
+                "input_schema": {"type": "object"}
+            }]
+        }))?)
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), 1024 * 1024).await?)?;
+    assert_eq!(
+        body.pointer("/content/0/name")
+            .and_then(serde_json::Value::as_str),
+        Some("mcp__plugin_context7_context7__query-docs")
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn non_stream_request_rejects_output_limit_above_server_cap()
 -> Result<(), Box<dyn std::error::Error>> {
     let app = http::router(Bridge::new(config()?))?;

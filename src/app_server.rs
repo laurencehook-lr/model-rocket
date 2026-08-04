@@ -15,7 +15,7 @@ use tokio::{
     time::timeout,
 };
 
-use crate::{anthropic::Tool, error::BridgeError};
+use crate::{anthropic::Tool, error::BridgeError, tool_names::DynamicToolNames};
 
 const RPC_TIMEOUT: Duration = Duration::from_secs(20);
 const TURN_TIMEOUT: Duration = Duration::from_secs(600);
@@ -115,6 +115,7 @@ pub struct AppServer {
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
     next_id: u64,
+    dynamic_tool_names: DynamicToolNames,
 }
 
 struct IsolatedCodexHome {
@@ -240,6 +241,7 @@ impl AppServer {
             stdin,
             stdout: BufReader::new(stdout),
             next_id: 1,
+            dynamic_tool_names: DynamicToolNames::default(),
         };
         server.initialize().await?;
         Ok(server)
@@ -319,8 +321,10 @@ impl AppServer {
             .cwd
             .to_str()
             .ok_or_else(|| BridgeError::configuration("MODEL_ROCKET_CWD must be valid UTF-8"))?;
-        let dynamic_tools = request
-            .tools
+        self.dynamic_tool_names = DynamicToolNames::from_claude_tools(request.tools)?;
+        let dynamic_tools = self
+            .dynamic_tool_names
+            .tools()
             .iter()
             .map(|tool| {
                 json!({
@@ -493,7 +497,7 @@ impl AppServer {
                 }
                 Some("item/tool/call") => {
                     if !limiter.reached {
-                        return parse_tool_call(message, expected, usage)
+                        return parse_tool_call(message, expected, usage, &self.dynamic_tool_names)
                             .map(TurnOutcome::ToolCall);
                     }
                 }
@@ -708,6 +712,7 @@ fn parse_tool_call(
     message: RpcMessage,
     expected: (&str, &str),
     usage: Option<TokenUsage>,
+    dynamic_tool_names: &DynamicToolNames,
 ) -> Result<PendingToolCall, BridgeError> {
     let rpc_id = message
         .id
@@ -723,12 +728,13 @@ fn parse_tool_call(
             "dynamic tool call does not match the active turn",
         ));
     }
+    let claude_tool_name = dynamic_tool_names.claude_name(&call.tool)?.to_owned();
     Ok(PendingToolCall {
         rpc_id,
         call_id: call.call_id,
         thread_id: call.thread_id,
         turn_id: call.turn_id,
-        tool: call.tool,
+        tool: claude_tool_name,
         arguments: call.arguments,
         usage,
     })

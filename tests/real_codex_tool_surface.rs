@@ -181,7 +181,7 @@ async fn begin_turn(
             "sandbox":"read-only",
             "environments":[],
             "runtimeWorkspaceRoots":[],
-            "dynamicTools":[{"type":"function","name":"weather","description":"Get weather","inputSchema":{"type":"object"}}]
+            "dynamicTools":[{"type":"function","name":"model_rocket_tool_0","description":"Claude Code tool name: weather\n\nGet weather","inputSchema":{"type":"object"}}]
         }}),
     )
     .await?;
@@ -242,7 +242,7 @@ async fn real_codex_exposes_only_the_supplied_dynamic_tool()
             .first()
             .and_then(|tool| tool.get("name"))
             .and_then(Value::as_str),
-        Some("weather")
+        Some("model_rocket_tool_0")
     );
 
     child.kill().await?;

@@ -7,9 +7,9 @@
 | REQ-003 | A Claude request reaches the fake Anthropic server with its body and OAuth bearer, but without the router token or API-key header. |
 | REQ-004 | App Server process tests require ChatGPT account type and the exact configured model. |
 | REQ-005 | In one router process, send Claude, GPT, and Claude requests and assert each reaches only its selected adapter. |
-| REQ-006, REQ-006A | Tests decode exact JSON history, check developer instructions, map a structured-output schema exactly, observe an early GPT delta, validate non-stream text and tool JSON, assert exact completed-turn usage, and prove unavailable tool-boundary usage is omitted. |
+| REQ-006, REQ-006A, REQ-006B | Tests decode exact JSON history, check developer instructions, map a structured-output schema exactly, observe an early GPT delta, validate non-stream text and tool JSON, round-trip a reserved `mcp__` tool name through a safe internal identifier, reject unregistered tool identifiers, assert exact completed-turn usage, and prove unavailable tool-boundary usage is omitted. |
 | REQ-007 | An output-limit test proves truncation at a UTF-8 boundary and the `max_tokens` stop reason. |
-| REQ-008 | Negative tests cover unknown GPT models, unsupported fields, bad authentication, and unavailable dependencies. |
+| REQ-008 | Negative tests cover unknown GPT models, unsupported fields, invalid or duplicate Claude tool names, unregistered Codex tool identifiers, bad authentication, and unavailable dependencies. |
 | REQ-009 | Authentication tests accept only the matching launch-generated `x-model-rocket-token`. |
 | REQ-010 | Tool tests prove same-session continuation, cross-session rejection, and bounded pending-session lifetime. |
 | REQ-011 | Proxy, launcher, and child-environment tests prove the Anthropic bearer and ambient credentials cannot reach Codex. |

@@ -32,7 +32,8 @@ def send_usage(input_tokens, output_tokens):
 
 
 account_type = os.environ.get("FAKE_ACCOUNT_TYPE", "chatgpt")
-tool_name = os.environ.get("FAKE_TOOL_NAME", "weather")
+tool_name_override = os.environ.get("FAKE_TOOL_NAME")
+tool_name = None
 tool_arguments = json.loads(os.environ.get("FAKE_TOOL_ARGUMENTS", '{"city":"London"}'))
 for raw_line in sys.stdin:
     message = json.loads(raw_line)
@@ -48,6 +49,10 @@ for raw_line in sys.stdin:
     elif method == "model/list":
         send({"id": request_id, "result": {"data": [{"id": "gpt-5.6-sol", "model": "gpt-5.6-sol"}], "nextCursor": None}})
     elif method == "thread/start":
+        dynamic_tools = message["params"].get("dynamicTools", [])
+        tool_name = tool_name_override
+        if tool_name is None and dynamic_tools:
+            tool_name = dynamic_tools[0]["name"]
         send({"id": request_id, "result": {"thread": {"id": "thread_1"}}})
     elif method == "turn/start":
         send({"id": request_id, "result": {"turn": {"id": "turn_1", "status": "inProgress", "items": [], "error": None}}})
@@ -55,6 +60,8 @@ for raw_line in sys.stdin:
         if "FORBIDDEN_TOOL" in prompt:
             send({"method": "item/started", "params": {"item": {"type": "commandExecution"}}})
         elif "CALL_TOOL" in prompt:
+            if tool_name is None:
+                raise RuntimeError("CALL_TOOL requested without a dynamic tool")
             send({"id": "tool_rpc_1", "method": "item/tool/call", "params": {"arguments": tool_arguments, "callId": "call_1", "threadId": "thread_1", "tool": tool_name, "turnId": "turn_1"}})
             send_usage(20, 4)
         else:

@@ -20,7 +20,7 @@ for raw_line in sys.stdin:
     if method == "initialize":
         send({"id": request_id, "result": {"userAgent": "fake-malformed-warning"}})
     elif method == "initialized":
-        send({"method": "configWarning", "params": {}})
+        send({"method": "configWarning", "result": None, "params": {"summary": "malformed warning"}})
     elif method == "thread/start":
         send({"id": request_id, "result": {"thread": {"id": "thread_warning"}}})
     elif method == "turn/start":

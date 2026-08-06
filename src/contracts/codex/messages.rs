@@ -608,6 +608,20 @@ where
     JsonRpcRequestId::deserialize(deserializer).map(Some)
 }
 
+fn deserialize_present_result<'de, D>(deserializer: D) -> Result<Option<Value>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Value::deserialize(deserializer).map(Some)
+}
+
+fn deserialize_present_error<'de, D>(deserializer: D) -> Result<Option<RpcError>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    RpcError::deserialize(deserializer).map(Some)
+}
+
 #[derive(Debug, Deserialize)]
 pub(crate) struct RpcMessage {
     #[serde(default, deserialize_with = "deserialize_optional_request_id")]
@@ -616,9 +630,9 @@ pub(crate) struct RpcMessage {
     pub(crate) method: Option<String>,
     #[serde(default)]
     pub(crate) params: Option<Value>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_present_result")]
     pub(crate) result: Option<Value>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_present_error")]
     pub(crate) error: Option<RpcError>,
 }
 
@@ -961,6 +975,7 @@ mod tests {
             json!({"method": EVENT_CONFIG_WARNING, "params": "invalid"}),
             json!({"id": 7, "method": EVENT_CONFIG_WARNING, "params": {"summary": "warning"}}),
             json!({"method": EVENT_CONFIG_WARNING, "result": {}, "params": {"summary": "warning"}}),
+            json!({"method": EVENT_CONFIG_WARNING, "result": null, "params": {"summary": "warning"}}),
             json!({"method": EVENT_CONFIG_WARNING, "error": {"code": 1, "message": "error"}, "params": {"summary": "warning"}}),
             json!({"method": EVENT_CONFIG_WARNING, "params": {"summary": "warning", "unknown": true}}),
             json!({"method": EVENT_CONFIG_WARNING, "params": {
@@ -974,6 +989,14 @@ mod tests {
             let message = serde_json::from_value::<RpcMessage>(invalid)?;
             assert!(validate_ignored_notification(&message).is_err());
         }
+        assert!(
+            serde_json::from_value::<RpcMessage>(json!({
+                "method": EVENT_CONFIG_WARNING,
+                "error": null,
+                "params": {"summary": "warning"}
+            }))
+            .is_err()
+        );
 
         let unknown: RpcMessage = serde_json::from_value(json!({
             "method": "thread/unknown",

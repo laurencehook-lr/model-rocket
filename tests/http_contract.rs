@@ -963,7 +963,7 @@ async fn malformed_config_warning_fails_in_the_shared_dispatcher()
         }))?)
         .await?;
     let body = String::from_utf8(to_bytes(response.into_body(), 1024 * 1024).await?.to_vec())?;
-    assert!(body.contains("invalid configWarning params"));
+    assert!(body.contains("configWarning is not a JSON-RPC notification"));
     assert!(!body.contains("must not escape"));
     assert!(!body.contains("\"stop_reason\":\"end_turn\""));
     Ok(())

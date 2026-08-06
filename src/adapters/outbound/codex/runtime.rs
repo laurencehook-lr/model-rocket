@@ -929,6 +929,10 @@ impl AppServerConnection {
             return Ok(());
         }
 
+        if m::validate_ignored_notification(&message)? {
+            return Ok(());
+        }
+
         let thread_id = m::event_thread_id(&message);
         if thread_id.is_none()
             && let Some(method) = message

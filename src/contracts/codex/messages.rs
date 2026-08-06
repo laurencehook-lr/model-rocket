@@ -35,6 +35,7 @@ pub(crate) const EVENT_TURN_STARTED: &str = "turn/started";
 pub(crate) const EVENT_REMOTE_CONTROL_STATUS_CHANGED: &str = "remoteControl/status/changed";
 pub(crate) const EVENT_THREAD_SETTINGS_UPDATED: &str = "thread/settings/updated";
 pub(crate) const EVENT_THREAD_STATUS_CHANGED: &str = "thread/status/changed";
+pub(crate) const EVENT_CONFIG_WARNING: &str = "configWarning";
 pub(crate) const STARTED_TIMESTAMP_FIELD: &str = "startedAtMs";
 pub(crate) const COMPLETED_TIMESTAMP_FIELD: &str = "completedAtMs";
 
@@ -114,6 +115,83 @@ pub(crate) fn is_turn_scoped_event(method: &str) -> bool {
             | EVENT_ERROR
             | EVENT_TURN_COMPLETED
     )
+}
+
+pub(crate) fn validate_ignored_notification(message: &RpcMessage) -> Result<bool, BridgeError> {
+    if message.method.as_deref() != Some(EVENT_CONFIG_WARNING) {
+        return Ok(false);
+    }
+    if message.id.is_some() || message.result.is_some() || message.error.is_some() {
+        return Err(BridgeError::protocol(
+            "configWarning is not a JSON-RPC notification",
+        ));
+    }
+    let params = message
+        .params
+        .clone()
+        .ok_or_else(|| BridgeError::protocol("configWarning has no params"))?;
+    let warning = serde_json::from_value::<ConfigWarningParams>(params)
+        .map_err(|error| BridgeError::protocol(format!("invalid configWarning params: {error}")))?;
+    warning.validate()?;
+    Ok(true)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ConfigWarningParams {
+    summary: String,
+    #[serde(default, rename = "details")]
+    _details: Option<String>,
+    #[serde(default, rename = "path")]
+    _path: Option<String>,
+    #[serde(default)]
+    range: Option<TextRange>,
+}
+
+impl ConfigWarningParams {
+    fn validate(&self) -> Result<(), BridgeError> {
+        if self.summary.is_empty() {
+            return Err(BridgeError::protocol(
+                "configWarning summary must not be empty",
+            ));
+        }
+        if let Some(range) = &self.range {
+            range.validate()?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TextRange {
+    start: TextPosition,
+    end: TextPosition,
+}
+
+impl TextRange {
+    fn validate(&self) -> Result<(), BridgeError> {
+        self.start.validate()?;
+        self.end.validate()
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TextPosition {
+    line: usize,
+    column: usize,
+}
+
+impl TextPosition {
+    fn validate(&self) -> Result<(), BridgeError> {
+        if self.line == 0 || self.column == 0 {
+            return Err(BridgeError::protocol(
+                "configWarning range positions must be one-based",
+            ));
+        }
+        Ok(())
+    }
 }
 
 pub(crate) fn thread_start_params(
@@ -257,6 +335,7 @@ pub(crate) fn initialize_params() -> Value {
                 EVENT_REMOTE_CONTROL_STATUS_CHANGED,
                 EVENT_THREAD_SETTINGS_UPDATED,
                 EVENT_THREAD_STATUS_CHANGED,
+                EVENT_CONFIG_WARNING,
             ],
         },
     })
@@ -770,11 +849,12 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        EVENT_ACCOUNT_RATE_LIMITS_UPDATED, EVENT_REMOTE_CONTROL_STATUS_CHANGED,
-        EVENT_THREAD_SETTINGS_UPDATED, EVENT_THREAD_STARTED, EVENT_THREAD_STATUS_CHANGED,
-        EVENT_TURN_STARTED, JsonRpcRequestId, RpcMessage, agent_message_delta, app_server_error,
-        initialize_params, missing_message_method, model_page, parse_tool_call, token_usage,
-        turn_status, unsupported_notification, validate_item_lifecycle,
+        EVENT_ACCOUNT_RATE_LIMITS_UPDATED, EVENT_CONFIG_WARNING,
+        EVENT_REMOTE_CONTROL_STATUS_CHANGED, EVENT_THREAD_SETTINGS_UPDATED, EVENT_THREAD_STARTED,
+        EVENT_THREAD_STATUS_CHANGED, EVENT_TURN_STARTED, JsonRpcRequestId, RpcMessage,
+        agent_message_delta, app_server_error, initialize_params, missing_message_method,
+        model_page, parse_tool_call, token_usage, turn_status, unsupported_notification,
+        validate_ignored_notification, validate_item_lifecycle,
     };
     use crate::contracts::codex::tool_names::DynamicToolNames;
 
@@ -848,8 +928,59 @@ mod tests {
                 Value::String(EVENT_REMOTE_CONTROL_STATUS_CHANGED.to_owned()),
                 Value::String(EVENT_THREAD_SETTINGS_UPDATED.to_owned()),
                 Value::String(EVENT_THREAD_STATUS_CHANGED.to_owned()),
+                Value::String(EVENT_CONFIG_WARNING.to_owned()),
             ])
         );
+    }
+
+    #[test]
+    fn config_warning_requires_its_pinned_notification_shape()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let valid: RpcMessage = serde_json::from_value(json!({
+            "method": EVENT_CONFIG_WARNING,
+            "params": {
+                "summary": "config warning",
+                "details": "using defaults",
+                "path": "/tmp/config.toml",
+                "range": {
+                    "start": {"line": 1, "column": 2},
+                    "end": {"line": 3, "column": 4}
+                }
+            }
+        }))?;
+        assert!(validate_ignored_notification(&valid)?);
+
+        let startup: RpcMessage = serde_json::from_value(json!({
+            "method": EVENT_CONFIG_WARNING,
+            "params": {"summary": "empty auth fixture"}
+        }))?;
+        assert!(validate_ignored_notification(&startup)?);
+
+        for invalid in [
+            json!({"method": EVENT_CONFIG_WARNING, "params": {}}),
+            json!({"method": EVENT_CONFIG_WARNING, "params": "invalid"}),
+            json!({"id": 7, "method": EVENT_CONFIG_WARNING, "params": {"summary": "warning"}}),
+            json!({"method": EVENT_CONFIG_WARNING, "result": {}, "params": {"summary": "warning"}}),
+            json!({"method": EVENT_CONFIG_WARNING, "error": {"code": 1, "message": "error"}, "params": {"summary": "warning"}}),
+            json!({"method": EVENT_CONFIG_WARNING, "params": {"summary": "warning", "unknown": true}}),
+            json!({"method": EVENT_CONFIG_WARNING, "params": {
+                "summary": "warning",
+                "range": {
+                    "start": {"line": 0, "column": 1},
+                    "end": {"line": 1, "column": 1}
+                }
+            }}),
+        ] {
+            let message = serde_json::from_value::<RpcMessage>(invalid)?;
+            assert!(validate_ignored_notification(&message).is_err());
+        }
+
+        let unknown: RpcMessage = serde_json::from_value(json!({
+            "method": "thread/unknown",
+            "params": {}
+        }))?;
+        assert!(!validate_ignored_notification(&unknown)?);
+        Ok(())
     }
 
     #[test]

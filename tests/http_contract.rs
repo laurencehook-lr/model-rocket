@@ -949,6 +949,27 @@ async fn recognized_notification_without_an_active_thread_fails_closed()
 }
 
 #[tokio::test]
+async fn malformed_config_warning_fails_in_the_shared_dispatcher()
+-> Result<(), Box<dyn std::error::Error>> {
+    let app = test_http::router(test_model_router(&config_with_fixture(
+        "fake_codex_malformed_config_warning.py",
+    )?))?;
+    let response = app
+        .oneshot(request(&serde_json::json!({
+            "model": ROUTE_MODEL,
+            "max_tokens": 100,
+            "stream": true,
+            "messages": [{"role": "user", "content": "hello"}]
+        }))?)
+        .await?;
+    let body = String::from_utf8(to_bytes(response.into_body(), 1024 * 1024).await?.to_vec())?;
+    assert!(body.contains("invalid configWarning params"));
+    assert!(!body.contains("must not escape"));
+    assert!(!body.contains("\"stop_reason\":\"end_turn\""));
+    Ok(())
+}
+
+#[tokio::test]
 async fn foreign_turn_completion_cannot_terminate_the_active_turn()
 -> Result<(), Box<dyn std::error::Error>> {
     let app = test_http::router(test_model_router(&config_with_fixture(

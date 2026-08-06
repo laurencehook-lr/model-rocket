@@ -69,6 +69,26 @@ pub struct Tool {
     #[serde(default)]
     pub description: String,
     pub input_schema: Value,
+    #[serde(default)]
+    pub cache_control: Option<CacheControl>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(tag = "type", deny_unknown_fields)]
+pub enum CacheControl {
+    #[serde(rename = "ephemeral")]
+    Ephemeral {
+        #[serde(default)]
+        ttl: Option<CacheControlTtl>,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub enum CacheControlTtl {
+    #[serde(rename = "5m")]
+    FiveMinutes,
+    #[serde(rename = "1h")]
+    OneHour,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -562,6 +582,32 @@ mod tests {
     use super::MessagesRequest;
 
     #[test]
+    fn tool_definition_accepts_supported_cache_control_metadata() -> Result<(), serde_json::Error> {
+        let request = serde_json::from_str::<MessagesRequest>(
+            r#"{
+                "model":"anthropic-model-rocket-gpt-5.6-sol-normal-high",
+                "max_tokens":100,
+                "messages":[],
+                "tools":[{
+                    "name":"weather",
+                    "description":"Get weather",
+                    "input_schema":{"type":"object"},
+                    "cache_control":{"type":"ephemeral","ttl":"1h"}
+                }]
+            }"#,
+        )?;
+
+        assert_eq!(request.tools.len(), 1);
+        assert!(
+            request
+                .tools
+                .first()
+                .is_some_and(|tool| tool.cache_control.is_some())
+        );
+        Ok(())
+    }
+
+    #[test]
     fn tool_definition_rejects_unsupported_extra_fields() {
         let request = serde_json::from_str::<MessagesRequest>(
             r#"{
@@ -572,7 +618,7 @@ mod tests {
                     "name":"weather",
                     "description":"Get weather",
                     "input_schema":{"type":"object"},
-                    "cache_control":{"type":"ephemeral"}
+                    "unsupported_field":true
                 }]
             }"#,
         );

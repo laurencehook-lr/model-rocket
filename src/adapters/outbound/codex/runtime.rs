@@ -830,7 +830,11 @@ impl AppServerConnection {
         let message = match timeout(RPC_TIMEOUT, receiver).await {
             Ok(Ok(result)) => result?,
             Ok(Err(_)) => {
-                return Err(BridgeError::unavailable(d::RESPONSE_CHANNEL_CLOSED));
+                return Err(if self.is_alive() {
+                    BridgeError::unavailable(d::RESPONSE_CHANNEL_CLOSED)
+                } else {
+                    self.connection_error()
+                });
             }
             Err(_) => {
                 let error = d::request_timeout(method);

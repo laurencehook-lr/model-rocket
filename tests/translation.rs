@@ -38,6 +38,41 @@ fn transcript_preserves_text_and_tool_order() -> Result<(), Box<dyn std::error::
 }
 
 #[test]
+fn supported_tool_cache_metadata_is_dropped_at_the_domain_boundary()
+-> Result<(), Box<dyn std::error::Error>> {
+    let request = serde_json::from_value::<MessagesRequest>(serde_json::json!({
+        "model": "anthropic-model-rocket-gpt-5.6-sol-normal-high",
+        "max_tokens": 100,
+        "messages": [{"role": "user", "content": "What is the weather?"}],
+        "tools": [{
+            "name": "weather",
+            "description": "Get weather",
+            "input_schema": {"type": "object"},
+            "cache_control": {"type": "ephemeral", "ttl": "5m"}
+        }]
+    }))?;
+    let execution = request.execute_message(
+        ClaudeSessionId::from("claude-session"),
+        ModelRoute {
+            claude_model: ClaudeModelId::new("anthropic-model-rocket-gpt-5.6-sol-normal-high"),
+            display_name: "Test route".into(),
+            description: "Test route description".into(),
+            codex_model: CodexModelId::new("gpt-5.6-sol"),
+            service_tier: ServiceTier::Standard,
+            reasoning_effort: ReasoningEffort::High,
+        },
+    )?;
+
+    let tools = execution.tools().as_slice();
+    assert_eq!(tools.len(), 1);
+    assert_eq!(
+        tools.first().map(|tool| tool.name().as_str()),
+        Some("weather")
+    );
+    Ok(())
+}
+
+#[test]
 fn malformed_or_known_unsupported_conversations_fail_explicitly()
 -> Result<(), Box<dyn std::error::Error>> {
     let invalid_messages = [

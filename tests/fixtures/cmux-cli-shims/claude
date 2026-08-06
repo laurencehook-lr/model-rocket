@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "launcher invoked the PATH Claude shim" >&2
+exit 81

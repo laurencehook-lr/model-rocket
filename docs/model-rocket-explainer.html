@@ -1,0 +1,1177 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; style-src 'unsafe-inline' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; img-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; font-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; media-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; worker-src blob:; connect-src blob: data:; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <title>How Model Rocket Works</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        background: light-dark(rgb(255 255 255), rgb(24 24 24));
+      }
+      html,
+      body {
+        margin: 0;
+      }
+      body {
+        box-sizing: border-box;
+        padding: 1rem;
+        background: inherit;
+      }
+      iframe {
+        display: block;
+        width: 100%;
+        max-width: 736px;
+        height: calc(100vh - 2rem);
+        margin: 0 auto;
+        border: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <iframe
+      sandbox="allow-scripts"
+      referrerpolicy="no-referrer"
+      title="How Model Rocket Works"
+      srcdoc='&lt;!doctype html&gt;
+&lt;html lang="en"&gt;
+&lt;head&gt;
+&lt;meta charset="utf-8"&gt;
+&lt;meta name="viewport" content="width=device-width, initial-scale=1"&gt;
+&lt;meta name="referrer" content="no-referrer"&gt;
+&lt;meta http-equiv="Content-Security-Policy" content="default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27; &#x27;unsafe-eval&#x27; &#x27;wasm-unsafe-eval&#x27; blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; style-src &#x27;unsafe-inline&#x27; blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; img-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; font-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; media-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; worker-src blob:; connect-src blob: data:; frame-src &#x27;none&#x27;; object-src &#x27;none&#x27;; base-uri &#x27;none&#x27;; form-action &#x27;none&#x27;"&gt;
+&lt;title&gt;How Model Rocket Works&lt;/title&gt;
+&lt;style&gt;:root {
+  color-scheme: light dark;
+  background-color: var(--background) !important;
+
+  /* Agent-facing contract; keep in sync with SKILL.md. */
+  --background: light-dark(rgb(255 255 255), rgb(24 24 24));
+  --foreground: light-dark(rgb(26 28 31), rgb(255 255 255));
+  --card: color-mix(in oklab, var(--foreground) 5%, transparent);
+  --card-foreground: var(--foreground);
+  --popover: light-dark(rgb(255 255 255), rgb(45 45 45));
+  --popover-foreground: var(--foreground);
+  --primary: light-dark(rgb(51 156 255), rgb(131 195 255));
+  --primary-foreground: light-dark(rgb(255 255 255), rgb(13 13 13));
+  --secondary: light-dark(rgb(255 255 255 / 96%), rgb(54 54 54 / 96%));
+  --secondary-foreground: var(--foreground);
+  --muted: color-mix(in srgb, var(--foreground) 10%, transparent);
+  --muted-foreground: light-dark(
+    rgb(26 28 31 / 49.4%),
+    rgb(255 255 255 / 49.8%)
+  );
+  --accent: light-dark(rgb(229 242 255), rgb(13 39 63));
+  --accent-foreground: var(--primary);
+  --destructive: light-dark(rgb(226 85 7), rgb(255 133 73));
+  --border: light-dark(rgb(26 28 31 / 8%), rgb(255 255 255 / 8.2%));
+  --input: light-dark(
+    rgb(26 28 31 / 11.8%),
+    color-mix(in oklab, rgb(0 0 0) 10%, transparent)
+  );
+  --ring: light-dark(rgb(51 156 255), rgb(131 195 255 / 76%));
+  --font-size-base: 14px;
+  --viz-series-1: var(--primary);
+  --viz-series-2: light-dark(rgb(243 136 59), rgb(245 154 86));
+  --viz-series-3: light-dark(rgb(93 201 119), rgb(116 213 139));
+  --viz-series-4: light-dark(rgb(235 119 177), rgb(240 143 192));
+  --viz-series-5: light-dark(rgb(155 121 236), rgb(170 145 239));
+  --viz-series-6: light-dark(rgb(58 185 177), rgb(90 203 194));
+
+  /* Internal implementation variables; not part of the agent contract. */
+  --font-sans: -apple-system, system-ui, "Segoe UI", sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
+    monospace;
+  --font-size-normal: max(11px, var(--font-size-base));
+  --font-size-small: max(11px, calc(var(--font-size-base) - 2px));
+  --font-size-h1: calc(var(--font-size-normal) * 1.7142857143);
+  --font-size-h2: calc(var(--font-size-normal) * 1.4285714286);
+  --font-size-h3: calc(var(--font-size-normal) * 1.2857142857);
+  --font-weight-normal: 430;
+  --font-weight-medium: 500;
+  --line-height-normal: calc(var(--font-size-normal) * 1.5);
+  --line-height-small: calc(var(--font-size-small) + 4px);
+  --radius: 12.5px;
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-2xl: calc(var(--radius) * 1.6);
+  --radius-full: 9999px;
+  --shadow-sm: 0 1px 2px -1px rgb(0 0 0 / 8%);
+  --checkmark-image: url("data:image/svg+xml,%3Csvg xmlns=&#x27;http://www.w3.org/2000/svg&#x27; viewBox=&#x27;0 0 17 17&#x27;%3E%3Cpath d=&#x27;M12.8961 3.64101C13.1297 3.41418 13.4984 3.37523 13.7779 3.56581C14.0571 3.75635 14.1554 4.11331 14.0299 4.41347L13.9615 4.53847L7.71151 13.7045C7.59411 13.8767 7.4063 13.9877 7.19881 14.0072C6.99136 14.0267 6.78564 13.9533 6.63826 13.806L2.88826 10.056L2.79842 9.9457C2.6192 9.67407 2.64927 9.30496 2.88826 9.06581C3.12738 8.82669 3.49647 8.79676 3.76815 8.97597L3.8785 9.06581L7.03084 12.2182L12.8053 3.74941L12.8961 3.64101Z&#x27;/%3E%3C/svg%3E");
+
+  /* Legacy aliases; not part of the current agent contract. */
+  --viz-bg: transparent;
+  --viz-panel: var(--card);
+  --viz-border: var(--border);
+  --viz-text: var(--foreground);
+  --viz-muted: var(--muted-foreground);
+  --viz-accent: var(--primary);
+  --viz-accent-text: var(--primary-foreground);
+  --viz-accent-bg: var(--accent);
+  --viz-font-size: var(--font-size-base);
+  --viz-warning: var(--destructive);
+  --color-background-primary: var(--background);
+  --color-text-primary: var(--foreground);
+  --color-border-secondary: var(--border);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html &gt; body {
+  margin: 0;
+  padding: 5px;
+  color: var(--foreground);
+  background: transparent !important;
+  font-family: var(--font-sans);
+  font-size: var(--font-size-normal);
+  font-weight: var(--font-weight-normal);
+  line-height: var(--line-height-normal);
+}
+
+a {
+  color: color-mix(in srgb, var(--viz-accent) 80%, var(--viz-text) 20%);
+  cursor: pointer;
+  font-weight: var(--font-weight-medium);
+  text-decoration: none;
+  text-underline-offset: 2px;
+}
+
+a:is(:hover, :focus-visible) {
+  text-decoration-line: underline;
+  text-decoration-style: dashed;
+  text-decoration-thickness: 0.5px;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+p {
+  margin-block: 0;
+}
+
+h1 {
+  font-size: var(--font-size-h1);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+h2 {
+  font-size: var(--font-size-h2);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+h3,
+h4,
+h5,
+h6 {
+  font-size: var(--font-size-h3);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.3;
+}
+
+b,
+strong,
+th {
+  font-weight: var(--font-weight-medium);
+}
+
+code:not(pre code) {
+  display: inline;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  corner-shape: superellipse(1.5);
+  background: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  word-break: break-word;
+}
+
+#widget {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  padding: 0;
+  background: transparent !important;
+}
+
+.card {
+  min-width: 0;
+  padding: 12px;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  border-radius: var(--radius-2xl);
+  corner-shape: superellipse(1.5);
+  color: var(--card-foreground);
+  background: var(--card);
+}
+
+#widget &gt; :not(.card) {
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.viz-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(max(180px, 24%), 1fr));
+  gap: 10px;
+}
+
+.viz-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.viz-stat-value {
+  font-size: var(--font-size-h2);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+.viz-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.viz-badge {
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  color: var(--accent-foreground);
+  background: var(--accent);
+  font-weight: var(--font-weight-medium);
+}
+
+small,
+.text-small,
+.viz-badge {
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-small);
+}
+
+.text-muted {
+  color: var(--muted-foreground);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.viz-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.viz-controls &gt; .form-label {
+  display: grid;
+  min-width: min(100%, 260px);
+  flex: 1 1 280px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 2px 12px;
+  margin-bottom: 0;
+}
+
+.viz-controls &gt; .form-label &gt; :is(.form-control, .form-range, .form-select) {
+  grid-column: 1 / -1;
+}
+
+.btn,
+.form-check-input,
+.form-control,
+.form-range,
+.form-select {
+  font: inherit;
+}
+
+.btn {
+  appearance: button;
+  display: inline-flex;
+  inline-size: fit-content;
+  max-inline-size: 100%;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0 8px;
+  -webkit-app-region: no-drag;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--secondary-foreground);
+  background: var(--secondary);
+  cursor: var(--cursor-interaction, pointer);
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+.btn:is(.btn-block, .viz-tile) {
+  inline-size: 100%;
+}
+
+.btn.viz-tile {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+a.btn {
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.btn:not(:disabled):hover {
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.btn-primary {
+  border-color: transparent;
+  color: var(--primary-foreground);
+  background: var(--foreground);
+  background-clip: padding-box;
+}
+
+.btn-primary .text-muted {
+  color: color-mix(in srgb, var(--primary-foreground) 50%, transparent);
+}
+
+.btn-primary:not(:disabled):hover {
+  background: color-mix(in srgb, var(--foreground) 80%, transparent);
+  background-clip: padding-box;
+}
+
+.btn-ghost {
+  border-color: transparent;
+  color: var(--muted-foreground);
+  background: transparent;
+}
+
+.btn-ghost:not(:disabled):hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--foreground);
+}
+
+.form-control {
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  padding: 0 8px;
+  outline: none;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--foreground);
+  background: var(--secondary);
+}
+
+.form-control::placeholder {
+  color: var(--muted-foreground);
+}
+
+.form-control[type="file"] {
+  padding: 0;
+  overflow: hidden;
+  cursor: var(--cursor-interaction, pointer);
+}
+
+.form-control[type="file"]::file-selector-button {
+  min-height: 26px;
+  margin-right: 8px;
+  padding: 0 8px;
+  border: 0;
+  border-right: 1px solid var(--input);
+  color: var(--secondary-foreground);
+  background: var(--secondary);
+  cursor: inherit;
+  font: inherit;
+}
+
+.form-control[type="file"]:not(:disabled):hover::file-selector-button {
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.form-control-color[type="color"] {
+  width: 40px;
+  height: 28px;
+  padding: 3px;
+  cursor: var(--cursor-interaction, pointer);
+}
+
+.form-control-color[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.form-control-color[type="color"]::-webkit-color-swatch {
+  border: 0;
+  border-radius: calc(var(--radius-lg) - 4px);
+  corner-shape: superellipse(1.5);
+}
+
+textarea.form-control {
+  height: auto;
+  min-height: 72px;
+  padding: 8px 10px;
+  resize: vertical;
+}
+
+.form-control:focus-visible {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-control:disabled,
+.form-select:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.form-select {
+  appearance: none;
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  margin: 0;
+  padding: 0 32px 0 8px;
+  outline: none;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--foreground);
+  background-color: var(--secondary);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted-foreground) 50%),
+    linear-gradient(135deg, var(--muted-foreground) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) 50%,
+    calc(100% - 10px) 50%;
+  background-repeat: no-repeat;
+  background-size: 4px 4px;
+  cursor: var(--cursor-interaction, default);
+}
+
+.form-select:not(:disabled):hover {
+  background-color: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.form-select:focus-visible {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-check {
+  display: flex;
+  min-height: 20px;
+  align-items: center;
+  gap: 6px;
+}
+
+.form-check-input {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  margin: 0;
+  border: 1px solid var(--input);
+  color: var(--primary-foreground);
+  background-color: transparent;
+  cursor: var(--cursor-interaction, default);
+  transition:
+    background-color 150ms,
+    border-color 150ms,
+    box-shadow 150ms;
+}
+
+.form-check:not(.form-switch) .form-check-input[type="checkbox"] {
+  border-color: var(--input);
+  border-radius: var(--radius-sm);
+  corner-shape: superellipse(1.5);
+  background-color: var(--secondary);
+  box-shadow: var(--shadow-sm);
+}
+
+.form-check:not(.form-switch)
+  .form-check-input:not(:disabled):not(:checked):hover {
+  background-color: var(--card);
+}
+
+.form-check:not(.form-switch) .form-check-input[type="checkbox"]:checked {
+  border-color: var(--primary);
+  background-color: var(--primary);
+}
+
+.form-check:not(.form-switch)
+  .form-check-input[type="checkbox"]:checked::before {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--primary-foreground);
+  content: "";
+  mask: var(--checkmark-image) center / 12px 12px no-repeat;
+}
+
+.form-check-input[type="radio"] {
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-full);
+}
+
+.form-check-input[type="radio"]:checked {
+  border: 2px solid var(--primary);
+  background:
+    radial-gradient(circle, var(--primary-foreground) 0 2.5px, transparent 3px),
+    var(--primary);
+}
+
+.form-check:not(.form-switch) .form-check-input:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.form-check:not(.form-switch) .form-check-input:disabled {
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.form-check:not(.form-switch) .form-check-input:disabled + .form-check-label {
+  cursor: not-allowed;
+}
+
+.form-switch .form-check-input:disabled,
+.form-switch .form-check-input:disabled + .form-check-label {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.form-check-label {
+  color: var(--foreground);
+  cursor: var(--cursor-interaction, default);
+}
+
+.form-switch .form-check-input {
+  position: relative;
+  width: 32px;
+  height: 20px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--muted);
+  box-shadow: none;
+  transition: background-color 200ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.form-switch .form-check-input::before {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 16px;
+  height: 16px;
+  box-sizing: border-box;
+  border: 1px solid light-dark(var(--primary-foreground), var(--foreground));
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+  box-shadow: var(--shadow-sm);
+  content: "";
+  transform: translate(2px, -50%);
+  transition: transform 200ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.form-switch .form-check-input:checked {
+  background: var(--primary);
+}
+
+.form-switch .form-check-input:checked::before {
+  transform: translate(14px, -50%);
+}
+
+.form-switch .form-check-input:focus-visible {
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+.form-range {
+  appearance: none;
+  display: block;
+  width: 100%;
+  height: 28px;
+  flex: 1;
+  margin: 0;
+  padding: 0;
+  outline: none;
+  border: 0;
+  accent-color: var(--primary);
+  background: linear-gradient(
+      color-mix(in srgb, var(--foreground) 7%, transparent),
+      color-mix(in srgb, var(--foreground) 7%, transparent)
+    )
+    center / 100% 2px no-repeat;
+}
+
+.form-range::-webkit-slider-runnable-track {
+  height: 28px;
+  background: transparent;
+}
+
+.form-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  margin-top: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+}
+
+.form-range:focus-visible::-webkit-slider-thumb {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-range::-moz-range-track {
+  height: 28px;
+  background: transparent;
+}
+
+.form-range::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+}
+
+.form-range:focus-visible::-moz-range-thumb {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-range:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.btn:not(.btn-primary, .viz-tile):is(
+    [aria-pressed="true"],
+    [aria-selected="true"],
+    .is-selected
+  ) {
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+  background: var(--primary);
+}
+
+.btn.viz-tile:is([aria-pressed="true"], [aria-selected="true"], .is-selected) {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+#widget &gt; svg {
+  width: 100%;
+}
+
+.text-warning,
+.text-destructive {
+  color: var(--destructive);
+}
+
+html&gt;body{padding:0}&lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+&lt;section id="model-rocket-explainer" aria-labelledby="model-rocket-heading"&gt;
+  &lt;style&gt;
+    #model-rocket-explainer {
+      --mr-active: var(--viz-series-1);
+      color: var(--foreground);
+      font-size: var(--font-size-base);
+      display: grid;
+      gap: 1.5rem;
+      width: 100%;
+      min-width: 0;
+      overflow-x: hidden;
+    }
+    #model-rocket-explainer &gt; *,
+    #model-rocket-explainer .providers,
+    #model-rocket-explainer .provider-path,
+    #model-rocket-explainer .node {
+      min-width: 0;
+    }
+    #model-rocket-explainer .hero {
+      display: grid;
+      gap: 0.55rem;
+    }
+    #model-rocket-explainer .eyebrow {
+      color: var(--muted-foreground);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    #model-rocket-explainer h1,
+    #model-rocket-explainer h2,
+    #model-rocket-explainer p {
+      margin: 0;
+      overflow-wrap: anywhere;
+    }
+    #model-rocket-explainer .lede {
+      color: var(--muted-foreground);
+      max-width: 72ch;
+    }
+    #model-rocket-explainer .route-controls {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    #model-rocket-explainer .route-controls .label {
+      color: var(--muted-foreground);
+      margin-right: 0.25rem;
+    }
+    #model-rocket-explainer .architecture {
+      display: grid;
+      grid-template-columns: minmax(8.5rem, 0.8fr) minmax(12rem, 1.2fr) minmax(13rem, 1.35fr);
+      align-items: center;
+      gap: 1rem;
+      min-height: 18rem;
+    }
+    #model-rocket-explainer .node {
+      position: relative;
+      display: grid;
+      gap: 0.35rem;
+      padding: 1rem;
+      background: color-mix(in srgb, var(--muted) 54%, transparent);
+      border: 1px solid var(--border);
+      border-radius: 0.75rem;
+    }
+    #model-rocket-explainer .node strong {
+      font-weight: 500;
+    }
+    #model-rocket-explainer .node small {
+      color: var(--muted-foreground);
+    }
+    #model-rocket-explainer .router {
+      background: color-mix(in srgb, var(--viz-series-1) 12%, var(--card));
+    }
+    #model-rocket-explainer .providers {
+      display: grid;
+      gap: 1rem;
+    }
+    #model-rocket-explainer .provider-path {
+      display: grid;
+      grid-template-columns: 2.75rem 1fr;
+      align-items: center;
+      gap: 0.65rem;
+      opacity: 0.45;
+      transition: opacity 180ms ease, transform 180ms ease;
+    }
+    #model-rocket-explainer .provider-path.is-active {
+      opacity: 1;
+      transform: translateX(0.2rem);
+    }
+    #model-rocket-explainer .arrow {
+      position: relative;
+      height: 2px;
+      background: var(--border);
+    }
+    #model-rocket-explainer .arrow::after {
+      content: "";
+      position: absolute;
+      right: -1px;
+      top: 50%;
+      width: 0.55rem;
+      height: 0.55rem;
+      border-top: 2px solid var(--border);
+      border-right: 2px solid var(--border);
+      transform: translateY(-50%) rotate(45deg);
+    }
+    #model-rocket-explainer .provider-path.is-active .arrow,
+    #model-rocket-explainer .provider-path.is-active .arrow::after {
+      border-color: var(--mr-active);
+      background: var(--mr-active);
+    }
+    #model-rocket-explainer .provider-path.is-active .arrow::after {
+      background: transparent;
+    }
+    #model-rocket-explainer .route-detail {
+      border-left: 3px solid var(--mr-active);
+      padding-left: 0.85rem;
+      display: grid;
+      gap: 0.25rem;
+    }
+    #model-rocket-explainer .route-detail span {
+      color: var(--muted-foreground);
+    }
+    #model-rocket-explainer .facts {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 0.75rem;
+    }
+    #model-rocket-explainer .fact {
+      display: grid;
+      gap: 0.3rem;
+    }
+    #model-rocket-explainer .fact strong {
+      font-weight: 500;
+    }
+    #model-rocket-explainer .fact span {
+      color: var(--muted-foreground);
+    }
+    #model-rocket-explainer .assessment {
+      display: grid;
+      gap: 0.75rem;
+    }
+    #model-rocket-explainer .assessment header {
+      display: grid;
+      gap: 0.35rem;
+    }
+    #model-rocket-explainer .assessment header p {
+      color: var(--muted-foreground);
+    }
+    #model-rocket-explainer .comparison {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    #model-rocket-explainer .comparison th,
+    #model-rocket-explainer .comparison td {
+      text-align: left;
+      vertical-align: top;
+      padding: 0.75rem 0.6rem;
+      border-bottom: 1px solid var(--border);
+    }
+    #model-rocket-explainer .comparison th {
+      color: var(--muted-foreground);
+      font-weight: 500;
+    }
+    #model-rocket-explainer .status {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 0.2rem 0.55rem;
+      color: var(--foreground);
+      white-space: nowrap;
+    }
+    #model-rocket-explainer .status.closed {
+      background: color-mix(in srgb, var(--viz-series-2) 18%, transparent);
+    }
+    #model-rocket-explainer .status.partial {
+      background: color-mix(in srgb, var(--viz-series-3) 20%, transparent);
+    }
+    #model-rocket-explainer .status.open {
+      background: color-mix(in srgb, var(--destructive) 16%, transparent);
+    }
+    #model-rocket-explainer .decision {
+      display: grid;
+      gap: 0.4rem;
+      padding: 1rem;
+      border-left: 4px solid var(--destructive);
+      background: color-mix(in srgb, var(--destructive) 8%, transparent);
+    }
+    #model-rocket-explainer .decision strong {
+      font-weight: 500;
+    }
+    #model-rocket-explainer .sources {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem 1rem;
+      color: var(--muted-foreground);
+    }
+    #model-rocket-explainer .sources a {
+      color: var(--foreground);
+    }
+    @media (max-width: 720px) {
+      #model-rocket-explainer .route-controls .btn {
+        white-space: normal;
+      }
+      #model-rocket-explainer .architecture {
+        grid-template-columns: 1fr;
+        min-height: auto;
+      }
+      #model-rocket-explainer .provider-path {
+        grid-template-columns: 2rem 1fr;
+      }
+      #model-rocket-explainer .facts {
+        grid-template-columns: 1fr;
+      }
+      #model-rocket-explainer .comparison {
+        display: block;
+        overflow-x: auto;
+      }
+      #model-rocket-explainer .comparison tbody {
+        display: table-row-group;
+      }
+      #model-rocket-explainer .comparison thead {
+        display: table-header-group;
+      }
+      #model-rocket-explainer .comparison tr {
+        display: table-row;
+      }
+      #model-rocket-explainer .comparison th,
+      #model-rocket-explainer .comparison td {
+        min-width: 10rem;
+      }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #model-rocket-explainer .provider-path {
+        transition: none;
+      }
+    }
+  &lt;/style&gt;
+
+  &lt;header class="hero"&gt;
+    &lt;span class="eyebrow text-small"&gt;Model Rocket&lt;/span&gt;
+    &lt;h1 id="model-rocket-heading"&gt;One Claude Code harness, two model providers&lt;/h1&gt;
+    &lt;p class="lede"&gt;Claude Code stays in charge of tools, permissions, hooks, skills, MCP servers and worktrees. Model Rocket selects a provider from the requested model and translates only the GPT path.&lt;/p&gt;
+  &lt;/header&gt;
+
+  &lt;div class="route-controls" aria-label="Request path"&gt;
+    &lt;span class="label"&gt;Trace a request:&lt;/span&gt;
+    &lt;button class="btn btn-primary" type="button" data-route="anthropic" aria-pressed="true"&gt;Anthropic model&lt;/button&gt;
+    &lt;button class="btn" type="button" data-route="sol" aria-pressed="false"&gt;Configured GPT route&lt;/button&gt;
+  &lt;/div&gt;
+
+  &lt;div class="architecture" aria-label="Model Rocket request routing diagram"&gt;
+    &lt;div class="node"&gt;
+      &lt;strong&gt;Claude Code 2.1.223&lt;/strong&gt;
+      &lt;small&gt;Unmodified official binary&lt;/small&gt;
+      &lt;small&gt;Normal Messages API request&lt;/small&gt;
+    &lt;/div&gt;
+
+    &lt;div class="node router"&gt;
+      &lt;strong&gt;Model Rocket&lt;/strong&gt;
+      &lt;small&gt;Random 127.0.0.1 port&lt;/small&gt;
+      &lt;small&gt;Fresh 256-bit path bearer&lt;/small&gt;
+      &lt;small&gt;Routes from model-routes.json&lt;/small&gt;
+    &lt;/div&gt;
+
+    &lt;div class="providers"&gt;
+      &lt;div class="provider-path is-active" data-path="anthropic"&gt;
+        &lt;div class="arrow" aria-hidden="true"&gt;&lt;/div&gt;
+        &lt;div class="node"&gt;
+          &lt;strong&gt;Anthropic&lt;/strong&gt;
+          &lt;small&gt;Direct HTTPS to api.anthropic.com&lt;/small&gt;
+          &lt;small&gt;Claude OAuth forwarded only here&lt;/small&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+      &lt;div class="provider-path" data-path="sol"&gt;
+        &lt;div class="arrow" aria-hidden="true"&gt;&lt;/div&gt;
+        &lt;div class="node"&gt;
+          &lt;strong&gt;Official Codex App Server&lt;/strong&gt;
+          &lt;small&gt;One supervised native process over local stdio&lt;/small&gt;
+          &lt;small&gt;One logical thread per Claude request&lt;/small&gt;
+          &lt;small&gt;Codex owns ChatGPT authentication&lt;/small&gt;
+          &lt;small&gt;OpenAI receives the translated turn&lt;/small&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+  &lt;/div&gt;
+
+  &lt;div class="route-detail" aria-live="polite"&gt;
+    &lt;strong data-route-title&gt;Claude request: transparent pass-through&lt;/strong&gt;
+    &lt;span data-route-copy&gt;The body streams unchanged to Anthropic. Model Rocket removes its local bearer and never sends it upstream.&lt;/span&gt;
+  &lt;/div&gt;
+
+  &lt;div class="facts"&gt;
+    &lt;div class="card fact"&gt;
+      &lt;strong&gt;No trusted CA&lt;/strong&gt;
+      &lt;span&gt;No TLS interception and no certificate added to macOS.&lt;/span&gt;
+    &lt;/div&gt;
+    &lt;div class="card fact"&gt;
+      &lt;strong&gt;No vendor patching&lt;/strong&gt;
+      &lt;span&gt;Claude Code and Codex remain official, unmodified native binaries whose target-specific release digests are checked before launch.&lt;/span&gt;
+    &lt;/div&gt;
+    &lt;div class="card fact"&gt;
+      &lt;strong&gt;No API-key fallback&lt;/strong&gt;
+      &lt;span&gt;Anthropic OAuth stays with Anthropic; Codex manages ChatGPT OAuth.&lt;/span&gt;
+    &lt;/div&gt;
+  &lt;/div&gt;
+
+  &lt;section class="assessment" aria-labelledby="catalogue-heading"&gt;
+    &lt;header&gt;
+      &lt;h2 id="catalogue-heading"&gt;Models and route policies are runtime configuration&lt;/h2&gt;
+      &lt;p&gt;The strict launch catalogue defines model IDs, context windows, route labels, delivery tiers and reasoning effort. Adding a compatible model requires a catalogue edit and restart, not a rebuild.&lt;/p&gt;
+    &lt;/header&gt;
+    &lt;div class="facts"&gt;
+      &lt;div class="card fact"&gt;
+        &lt;strong&gt;Installed catalogue&lt;/strong&gt;
+        &lt;span&gt;${XDG_CONFIG_HOME:-$HOME/.config}/model-rocket/model-routes.json&lt;/span&gt;
+      &lt;/div&gt;
+      &lt;div class="card fact"&gt;
+        &lt;strong&gt;Independent discovery&lt;/strong&gt;
+        &lt;span&gt;Preflight proves the current ChatGPT account advertises every configured model ID. Route compatibility is exercised separately.&lt;/span&gt;
+      &lt;/div&gt;
+      &lt;div class="card fact"&gt;
+        &lt;strong&gt;Security stays compiled&lt;/strong&gt;
+        &lt;span&gt;The catalogue cannot change provider origins, credentials, executable paths, tools, instructions or raw protocol data.&lt;/span&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+  &lt;/section&gt;
+
+  &lt;section class="assessment" aria-labelledby="stepan-heading"&gt;
+    &lt;header&gt;
+      &lt;h2 id="stepan-heading"&gt;Stepan&#x27;s review, applied to Model Rocket&lt;/h2&gt;
+      &lt;p&gt;The old package and Model Rocket have materially different security boundaries. Some objections are eliminated; others remain decisions for Ledger Rocket.&lt;/p&gt;
+    &lt;/header&gt;
+    &lt;table class="comparison"&gt;
+      &lt;thead&gt;
+        &lt;tr&gt;
+          &lt;th&gt;Original concern&lt;/th&gt;
+          &lt;th&gt;Current finding&lt;/th&gt;
+          &lt;th&gt;Why&lt;/th&gt;
+        &lt;/tr&gt;
+      &lt;/thead&gt;
+      &lt;tbody&gt;
+        &lt;tr&gt;
+          &lt;td&gt;Locally trusted CA with universal MITM power&lt;/td&gt;
+          &lt;td&gt;&lt;span class="status closed"&gt;Not applicable&lt;/span&gt;&lt;/td&gt;
+          &lt;td&gt;Model Rocket uses plain HTTP only on loopback, then creates ordinary outbound TLS connections. It installs no CA and decrypts no vendor TLS.&lt;/td&gt;
+        &lt;/tr&gt;
+        &lt;tr&gt;
+          &lt;td&gt;Patched Claude Code behind an intercepting proxy&lt;/td&gt;
+          &lt;td&gt;&lt;span class="status closed"&gt;Not applicable&lt;/span&gt;&lt;/td&gt;
+          &lt;td&gt;The official Claude Code binary is launched unchanged through documented base-URL configuration. Its native format and pinned release digest are checked before and after the version probe.&lt;/td&gt;
+        &lt;/tr&gt;
+        &lt;tr&gt;
+          &lt;td&gt;Community npm package holds broad trust&lt;/td&gt;
+          &lt;td&gt;&lt;span class="status closed"&gt;Not applicable&lt;/span&gt;&lt;/td&gt;
+          &lt;td&gt;Model Rocket is the reviewed local Rust bridge. It does not add a Node runtime proxy or a third-party root of trust.&lt;/td&gt;
+        &lt;/tr&gt;
+        &lt;tr&gt;
+          &lt;td&gt;OpenAI subscription used from a non-Codex client&lt;/td&gt;
+          &lt;td&gt;&lt;span class="status partial"&gt;Materially reduced&lt;/span&gt;&lt;/td&gt;
+          &lt;td&gt;The official Codex CLI and documented App Server own the OpenAI session. OpenAI also publishes a Claude Code plugin that accepts ChatGPT subscriptions. Full primary-model routing is still not explicitly vendor-approved.&lt;/td&gt;
+        &lt;/tr&gt;
+        &lt;tr&gt;
+          &lt;td&gt;Anthropic subscription and gateway terms&lt;/td&gt;
+          &lt;td&gt;&lt;span class="status open"&gt;Still open&lt;/span&gt;&lt;/td&gt;
+          &lt;td&gt;Claude Code is unmodified and Anthropic documents LLM gateways, but its public guidance does not explicitly approve using Max OAuth while selected requests go to a non-Claude model.&lt;/td&gt;
+        &lt;/tr&gt;
+        &lt;tr&gt;
+          &lt;td&gt;Repatch after every Claude Code update&lt;/td&gt;
+          &lt;td&gt;&lt;span class="status partial"&gt;Partly removed&lt;/span&gt;&lt;/td&gt;
+          &lt;td&gt;There is nothing to repatch. Versions and protocol contracts remain pinned, so each vendor update still requires compatibility testing and a new release.&lt;/td&gt;
+        &lt;/tr&gt;
+        &lt;tr&gt;
+          &lt;td&gt;SOC 2 and ISO 27001 approval&lt;/td&gt;
+          &lt;td&gt;&lt;span class="status open"&gt;Still required&lt;/span&gt;&lt;/td&gt;
+          &lt;td&gt;The disqualifying CA exception is gone, but vendor approval, data-flow review, managed accounts, release provenance and security sign-off remain company controls.&lt;/td&gt;
+        &lt;/tr&gt;
+      &lt;/tbody&gt;
+    &lt;/table&gt;
+  &lt;/section&gt;
+
+  &lt;div class="decision"&gt;
+    &lt;strong&gt;Current decision: safer architecture, not yet approved for Ledger Rocket source.&lt;/strong&gt;
+    &lt;span&gt;Model Rocket now includes pinned Claude Code and Codex executable revalidation, strict ports-and-adapters enforcement, literal-free adapter boundaries, and automated multi-route wire coverage. Deployment with company source still requires interactive acceptance with the pinned vendor clients, confirmation that no CA from the retired package remains installed, and company/vendor approval.&lt;/span&gt;
+  &lt;/div&gt;
+
+  &lt;footer class="sources text-small"&gt;
+    &lt;span&gt;Primary references:&lt;/span&gt;
+    &lt;a href="https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md"&gt;OpenAI Codex App Server&lt;/a&gt;
+    &lt;a href="https://github.com/openai/codex-plugin-cc/blob/main/README.md"&gt;OpenAI Codex plugin for Claude Code&lt;/a&gt;
+    &lt;a href="https://docs.anthropic.com/en/docs/claude-code/llm-gateway"&gt;Anthropic LLM gateway guidance&lt;/a&gt;
+    &lt;a href="https://openai.com/policies/terms-of-use/"&gt;OpenAI Terms of Use&lt;/a&gt;
+  &lt;/footer&gt;
+
+  &lt;script&gt;
+    (() =&gt; {
+      const root = document.getElementById("model-rocket-explainer");
+      const buttons = Array.from(root.querySelectorAll("[data-route]"));
+      const paths = Array.from(root.querySelectorAll("[data-path]"));
+      const title = root.querySelector("[data-route-title]");
+      const copy = root.querySelector("[data-route-copy]");
+      const details = {
+        anthropic: {
+          title: "Claude request: transparent pass-through",
+          copy: "The body streams unchanged to Anthropic. Model Rocket removes its local bearer and never sends it upstream."
+        },
+        sol: {
+          title: "Sol request: protocol translation through official Codex",
+          copy: "Model Rocket maps each Claude request to an independent thread inside one shared Codex App Server. The bridge scheduler admits at most 64 GPT turn tasks at once. Started HTTP tasks wait without a global limit; disconnects do not cancel upstream work, per-thread event queues are unbounded, and retained continuations keep their upstream thread open."
+        }
+      };
+
+      const selectRoute = (route) =&gt; {
+        buttons.forEach((button) =&gt; {
+          const selected = button.dataset.route === route;
+          button.setAttribute("aria-pressed", String(selected));
+          button.classList.toggle("btn-primary", selected);
+        });
+        paths.forEach((path) =&gt; path.classList.toggle("is-active", path.dataset.path === route));
+        title.textContent = details[route].title;
+        copy.textContent = details[route].copy;
+      };
+
+      buttons.forEach((button) =&gt; {
+        button.addEventListener("click", () =&gt; selectRoute(button.dataset.route));
+      });
+    })();
+  &lt;/script&gt;
+&lt;/section&gt;
+
+&lt;/body&gt;
+&lt;/html&gt;
+'
+    ></iframe>
+  </body>
+</html>

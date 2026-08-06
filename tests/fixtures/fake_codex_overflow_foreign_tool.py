@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+import json
+import sys
+
+
+if sys.argv[1:] == ["--version"]:
+    print("codex-cli 0.146.0")
+    sys.exit(0)
+
+
+def send(message):
+    sys.stdout.write(json.dumps(message, separators=(",", ":")) + "\n")
+    sys.stdout.flush()
+
+
+tool_name = None
+for raw_line in sys.stdin:
+    message = json.loads(raw_line)
+    method = message.get("method")
+    request_id = message.get("id")
+    if method == "initialize":
+        send({"id": request_id, "result": {"userAgent": "fake-overflow-foreign-tool"}})
+    elif method == "initialized":
+        continue
+    elif method == "account/read":
+        send({"id": request_id, "result": {"account": {"type": "chatgpt"}}})
+    elif method == "model/list":
+        send({"id": request_id, "result": {"data": [{"id": "gpt-5.6-sol", "model": "gpt-5.6-sol"}], "nextCursor": None}})
+    elif method == "thread/start":
+        dynamic_tools = message["params"].get("dynamicTools", [])
+        if not dynamic_tools:
+            raise RuntimeError("dynamic tool missing")
+        tool_name = dynamic_tools[0]["name"]
+        send({"id": request_id, "result": {"thread": {"id": "thread_overflow_tool"}}})
+    elif method == "turn/start":
+        send({"id": request_id, "result": {"turn": {"id": "turn_overflow_tool"}}})
+        send({"method": "item/agentMessage/delta", "params": {"delta": "éstreamed beyond limit", "itemId": "item_overflow_tool", "threadId": "thread_overflow_tool", "turnId": "turn_overflow_tool"}})
+    elif method == "turn/interrupt":
+        params = message.get("params", {})
+        if params.get("threadId") != "thread_overflow_tool":
+            raise RuntimeError("turn/interrupt used the wrong thread ID")
+        if params.get("turnId") != "turn_overflow_tool":
+            raise RuntimeError("turn/interrupt used the wrong turn ID")
+        send({"id": request_id, "result": {}})
+        send({"id": "foreign_tool_rpc", "method": "item/tool/call", "params": {"arguments": {}, "callId": "foreign_call", "threadId": "foreign_thread", "tool": tool_name, "turnId": "foreign_turn"}})
+    else:
+        send({"id": request_id, "error": {"code": -32601, "message": "unknown method"}})

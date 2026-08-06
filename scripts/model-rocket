@@ -1,0 +1,360 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_path="${BASH_SOURCE[0]}"
+while [[ -L "$script_path" ]]; do
+  link_dir="$(cd "$(dirname "$script_path")" && pwd)"
+  script_path="$(readlink "$script_path")"
+  if [[ "$script_path" != /* ]]; then
+    script_path="$link_dir/$script_path"
+  fi
+done
+script_dir="$(cd "$(dirname "$script_path")" && pwd)"
+project_dir="$(cd "$script_dir/.." && pwd)"
+
+: "${MODEL_ROCKET_LISTEN:=127.0.0.1:0}"
+: "${MODEL_ROCKET_CLAUDE_BIN:=$HOME/.local/bin/claude}"
+: "${MODEL_ROCKET_CODEX_BIN:=$HOME/.local/bin/codex-native}"
+: "${MODEL_ROCKET_BRIDGE_BIN:=$HOME/.local/bin/model-rocket-bridge}"
+: "${MODEL_ROCKET_CONFIG:=${XDG_CONFIG_HOME:-$HOME/.config}/model-rocket/model-routes.json}"
+user_cwd="$PWD"
+
+for argument in "$@"; do
+  case "$argument" in
+  --settings | --settings=* | --setting-sources | --setting-sources=* | \
+    --fallback-model | --fallback-model=* | --safe-mode | --safe-mode=* | --bare | --bare=*)
+    echo "Claude Code routing option is managed by Model Rocket: $argument" >&2
+    exit 1
+    ;;
+  esac
+done
+
+bearer="$(openssl rand -hex 32)"
+
+log_file="$(mktemp -t model-rocket.XXXXXX.log)"
+ready_file="$(mktemp -t model-rocket.XXXXXX.ready)"
+routing_settings_file=""
+catalogue_snapshot=""
+isolated_cwd=""
+if [[ -n "${MODEL_ROCKET_CWD:-}" ]]; then
+  app_server_cwd="$MODEL_ROCKET_CWD"
+else
+  isolated_cwd="$(mktemp -d -t model-rocket-workspace.XXXXXX)"
+  app_server_cwd="$isolated_cwd"
+fi
+bridge_pid=""
+
+cleanup() {
+  if [[ -n "$bridge_pid" ]]; then
+    kill -INT "$bridge_pid" 2>/dev/null || true
+    for _attempt in {1..20}; do
+      if ! kill -0 "$bridge_pid" 2>/dev/null; then
+        break
+      fi
+      sleep 0.05
+    done
+    if kill -0 "$bridge_pid" 2>/dev/null; then
+      kill -TERM "$bridge_pid" 2>/dev/null || true
+    fi
+    for _attempt in {1..20}; do
+      if ! kill -0 "$bridge_pid" 2>/dev/null; then
+        break
+      fi
+      sleep 0.05
+    done
+    if kill -0 "$bridge_pid" 2>/dev/null; then
+      kill -KILL "$bridge_pid" 2>/dev/null || true
+    fi
+    wait "$bridge_pid" 2>/dev/null || true
+  fi
+  rm -f "$log_file"
+  rm -f "$ready_file"
+  if [[ -n "$routing_settings_file" ]]; then
+    rm -f "$routing_settings_file"
+  fi
+  if [[ -n "$catalogue_snapshot" ]]; then
+    rm -f "$catalogue_snapshot"
+  fi
+  if [[ -n "$isolated_cwd" ]]; then
+    rm -rf -- "$isolated_cwd"
+  fi
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+bridge_bin="$MODEL_ROCKET_BRIDGE_BIN"
+
+if [[ "$bridge_bin" != /* ]]; then
+  echo "Bridge binary path must be absolute: $bridge_bin" >&2
+  exit 1
+fi
+if [[ ! -x "$bridge_bin" ]]; then
+  echo "Bridge binary is not executable: $bridge_bin" >&2
+  exit 1
+fi
+if [[ ! "$bridge_bin" =~ ^[/A-Za-z0-9._+-]+$ ]]; then
+  echo "Bridge binary path cannot be represented safely in the ConfigChange hook: $bridge_bin" >&2
+  exit 1
+fi
+
+if [[ "$MODEL_ROCKET_CONFIG" != /* ]]; then
+  echo "Model catalogue path must be absolute: $MODEL_ROCKET_CONFIG" >&2
+  exit 1
+fi
+if [[ ! -f "$MODEL_ROCKET_CONFIG" ]]; then
+  echo "Model catalogue is not a regular file: $MODEL_ROCKET_CONFIG" >&2
+  exit 1
+fi
+catalogue_snapshot="$(mktemp -t model-rocket.XXXXXX.routes.json)"
+chmod 600 "$catalogue_snapshot"
+cp "$MODEL_ROCKET_CONFIG" "$catalogue_snapshot"
+export MODEL_ROCKET_CONFIG="$catalogue_snapshot"
+
+default_claude_model=""
+canonical_gpt_model=""
+gpt_context_tokens=""
+required_claude_version=""
+bridge_startup_attempts=""
+launcher_contract="$(
+  env -i \
+    HOME="$HOME" \
+    PATH="/usr/bin:/bin" \
+    MODEL_ROCKET_CONFIG="$MODEL_ROCKET_CONFIG" \
+    "$bridge_bin" launcher-contract
+)"
+while IFS='=' read -r contract_key contract_value; do
+  case "$contract_key" in
+  default_claude_model) default_claude_model="$contract_value" ;;
+  canonical_gpt_model) canonical_gpt_model="$contract_value" ;;
+  gpt_context_tokens) gpt_context_tokens="$contract_value" ;;
+  required_claude_version) required_claude_version="$contract_value" ;;
+  bridge_startup_attempts) bridge_startup_attempts="$contract_value" ;;
+  *)
+    echo "Bridge returned an unknown launcher contract field: $contract_key" >&2
+    exit 1
+    ;;
+  esac
+done <<<"$launcher_contract"
+for contract_value in \
+  "$default_claude_model" \
+  "$canonical_gpt_model" \
+  "$gpt_context_tokens" \
+  "$required_claude_version" \
+  "$bridge_startup_attempts"; do
+  if [[ -z "$contract_value" ]]; then
+    echo "Bridge returned an incomplete launcher contract." >&2
+    exit 1
+  fi
+done
+if [[ ! "$bridge_startup_attempts" =~ ^[1-9][0-9]*$ ]]; then
+  echo "Bridge returned an invalid startup-attempt contract." >&2
+  exit 1
+fi
+MODEL_ROCKET_DEFAULT_MODEL="${MODEL_ROCKET_DEFAULT_MODEL:-$default_claude_model}"
+
+claude_config_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+project_root="$user_cwd"
+if resolved_project_root="$(git -C "$user_cwd" rev-parse --show-toplevel 2>/dev/null)"; then
+  project_root="$resolved_project_root"
+fi
+main_project_root="$project_root"
+if common_git_dir="$(git -C "$user_cwd" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"; then
+  main_project_root="$(dirname "$common_git_dir")"
+fi
+settings_paths=(
+  "$claude_config_dir/settings.json"
+  "$user_cwd/.claude/settings.json"
+  "$user_cwd/.claude/settings.local.json"
+  "$project_root/.claude/settings.json"
+  "$project_root/.claude/settings.local.json"
+  "$main_project_root/.claude/settings.json"
+  "$main_project_root/.claude/settings.local.json"
+)
+env -i \
+  HOME="$HOME" \
+  PATH="$PATH" \
+  "$bridge_bin" validate-settings "${settings_paths[@]}"
+
+if [[ "$MODEL_ROCKET_CLAUDE_BIN" != /* ]]; then
+  echo "Claude Code binary path must be absolute: $MODEL_ROCKET_CLAUDE_BIN" >&2
+  exit 1
+fi
+
+if [[ ! -x "$MODEL_ROCKET_CLAUDE_BIN" ]]; then
+  echo "Claude Code binary is not executable: $MODEL_ROCKET_CLAUDE_BIN" >&2
+  exit 1
+fi
+
+validated_claude_bin="$(env -i \
+  HOME="$HOME" \
+  PATH="/usr/bin:/bin" \
+  "$bridge_bin" validate-claude "$MODEL_ROCKET_CLAUDE_BIN")"
+if [[ "$validated_claude_bin" != /* || ! -x "$validated_claude_bin" ]]; then
+  echo "Bridge returned an invalid validated Claude Code executable path: $validated_claude_bin" >&2
+  exit 1
+fi
+MODEL_ROCKET_CLAUDE_BIN="$validated_claude_bin"
+
+if [[ "$MODEL_ROCKET_CODEX_BIN" != /* ]]; then
+  echo "Codex binary path must be absolute: $MODEL_ROCKET_CODEX_BIN" >&2
+  exit 1
+fi
+
+if [[ ! -x "$MODEL_ROCKET_CODEX_BIN" ]]; then
+  echo "Codex binary is not executable: $MODEL_ROCKET_CODEX_BIN" >&2
+  exit 1
+fi
+
+claude_unset_environment=(
+  -u MODEL_ROCKET_DEFAULT_MODEL
+  -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY
+  -u http_proxy -u https_proxy -u all_proxy
+  -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_CUSTOM_HEADERS
+  -u ANTHROPIC_MODEL
+  -u ANTHROPIC_SMALL_FAST_MODEL
+  -u ANTHROPIC_CUSTOM_MODEL_OPTION
+  -u ANTHROPIC_CUSTOM_MODEL_OPTION_NAME
+  -u ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION
+  -u ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES
+  -u ANTHROPIC_DEFAULT_FABLE_MODEL
+  -u ANTHROPIC_DEFAULT_FABLE_MODEL_NAME
+  -u ANTHROPIC_DEFAULT_FABLE_MODEL_DESCRIPTION
+  -u ANTHROPIC_DEFAULT_FABLE_MODEL_SUPPORTED_CAPABILITIES
+  -u ANTHROPIC_DEFAULT_OPUS_MODEL
+  -u ANTHROPIC_DEFAULT_OPUS_MODEL_NAME
+  -u ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION
+  -u ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES
+  -u ANTHROPIC_DEFAULT_SONNET_MODEL
+  -u ANTHROPIC_DEFAULT_SONNET_MODEL_NAME
+  -u ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION
+  -u ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES
+  -u ANTHROPIC_DEFAULT_HAIKU_MODEL
+  -u ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME
+  -u ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION
+  -u ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES
+  -u CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY
+  -u CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST
+  -u CLAUDE_CODE_USE_GATEWAY
+  -u CLAUDE_CODE_USE_BEDROCK
+  -u CLAUDE_CODE_USE_VERTEX
+  -u CLAUDE_CODE_USE_FOUNDRY
+  -u CLAUDE_CODE_USE_MANTLE
+  -u CLAUDE_CODE_OAUTH_TOKEN
+  -u CLAUDE_CODE_OAUTH_REFRESH_TOKEN
+  -u CLAUDE_CODE_OAUTH_SCOPES
+  -u CLAUDE_CODE_SUBAGENT_MODEL
+)
+
+actual_claude_version="$(
+  env "${claude_unset_environment[@]}" \
+    "$MODEL_ROCKET_CLAUDE_BIN" --version
+)"
+if [[ "$actual_claude_version" != "$required_claude_version" ]]; then
+  echo "Claude Code version mismatch: expected $required_claude_version, got $actual_claude_version" >&2
+  exit 1
+fi
+
+env -i \
+  HOME="$HOME" \
+  USER="${USER:-}" \
+  PATH="$PATH" \
+  TMPDIR="${TMPDIR:-/tmp}" \
+  LANG="${LANG:-C.UTF-8}" \
+  LC_ALL="${LC_ALL:-}" \
+  SHELL="${SHELL:-/bin/sh}" \
+  CODEX_HOME="${CODEX_HOME:-$HOME/.codex}" \
+  MODEL_ROCKET_CODEX_BIN="$MODEL_ROCKET_CODEX_BIN" \
+  MODEL_ROCKET_CONFIG="$MODEL_ROCKET_CONFIG" \
+  "$bridge_bin" preflight >/dev/null
+
+env -i \
+  HOME="$HOME" \
+  USER="${USER:-}" \
+  PATH="$PATH" \
+  TMPDIR="${TMPDIR:-/tmp}" \
+  LANG="${LANG:-C.UTF-8}" \
+  LC_ALL="${LC_ALL:-}" \
+  SHELL="${SHELL:-/bin/sh}" \
+  CODEX_HOME="${CODEX_HOME:-$HOME/.codex}" \
+  MODEL_ROCKET_BEARER="$bearer" \
+  MODEL_ROCKET_LISTEN="$MODEL_ROCKET_LISTEN" \
+  MODEL_ROCKET_READY_FILE="$ready_file" \
+  MODEL_ROCKET_CWD="$app_server_cwd" \
+  MODEL_ROCKET_CODEX_BIN="$MODEL_ROCKET_CODEX_BIN" \
+  MODEL_ROCKET_CONFIG="$MODEL_ROCKET_CONFIG" \
+  "$bridge_bin" serve >"$log_file" 2>&1 &
+bridge_pid=$!
+
+for (( _attempt = 0; _attempt < bridge_startup_attempts; _attempt++ )); do
+  if ! kill -0 "$bridge_pid" 2>/dev/null; then
+    cat "$log_file" >&2
+    exit 1
+  fi
+  if [[ -s "$ready_file" ]]; then
+    break
+  fi
+  sleep 0.1
+done
+
+if [[ ! -s "$ready_file" ]]; then
+  cat "$log_file" >&2
+  echo "Bridge did not publish its listening address." >&2
+  exit 1
+fi
+
+listen_addr="$(<"$ready_file")"
+if [[ "$listen_addr" == \[*\]:* ]]; then
+  listen_host="${listen_addr%%]*}"
+  listen_host="${listen_host#[}"
+  listen_proxy_host="[${listen_host}]"
+else
+  listen_host="${listen_addr%:*}"
+  listen_proxy_host="$listen_host"
+fi
+if ! curl --noproxy "$listen_host" --connect-timeout 1 --max-time 2 --fail --silent --output /dev/null "http://${listen_addr}/healthz"; then
+  cat "$log_file" >&2
+  echo "Bridge did not become healthy at http://${listen_addr}." >&2
+  exit 1
+fi
+
+proxy_bypass="localhost,127.0.0.1,::1,[::1],${listen_host},${listen_proxy_host}"
+if [[ -n "${NO_PROXY:-}" ]]; then
+  proxy_bypass+=",${NO_PROXY}"
+fi
+if [[ -n "${no_proxy:-}" ]]; then
+  proxy_bypass+=",${no_proxy}"
+fi
+if [[ ! "$proxy_bypass" =~ ^[][A-Za-z0-9.,:_*/%+-]+$ ]]; then
+  echo "NO_PROXY contains characters that cannot be represented safely in Claude settings." >&2
+  exit 1
+fi
+
+routing_settings_file="$(mktemp -t model-rocket.XXXXXX.settings.json)"
+chmod 600 "$routing_settings_file"
+env -i \
+  HOME="$HOME" \
+  PATH="$PATH" \
+  MODEL_ROCKET_CONFIG="$MODEL_ROCKET_CONFIG" \
+  "$bridge_bin" launcher-settings \
+    "$bridge_bin" \
+    "http://${listen_addr}/${bearer}" \
+    "$proxy_bypass" >"$routing_settings_file"
+
+revalidated_claude_bin="$(env -i \
+  HOME="$HOME" \
+  PATH="/usr/bin:/bin" \
+  "$bridge_bin" validate-claude "$MODEL_ROCKET_CLAUDE_BIN")"
+if [[ "$revalidated_claude_bin" != "$MODEL_ROCKET_CLAUDE_BIN" ]]; then
+  echo "Claude Code executable path changed after validation." >&2
+  exit 1
+fi
+
+env "${claude_unset_environment[@]}" \
+  ANTHROPIC_BASE_URL="http://${listen_addr}/${bearer}" \
+  ANTHROPIC_CUSTOM_MODEL_OPTION="$canonical_gpt_model" \
+  CLAUDE_CODE_MAX_CONTEXT_TOKENS="$gpt_context_tokens" \
+  NO_PROXY="$proxy_bypass" \
+  no_proxy="$proxy_bypass" \
+  "$MODEL_ROCKET_CLAUDE_BIN" --model "$MODEL_ROCKET_DEFAULT_MODEL" --add-dir "$user_cwd" \
+    --settings "$routing_settings_file" "$@"

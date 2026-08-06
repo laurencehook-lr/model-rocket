@@ -1,0 +1,44 @@
+{
+  "models": [
+    {
+      "default_reasoning_level": "low",
+      "supported_reasoning_levels": [
+        { "effort": "low", "description": "Low reasoning" },
+        { "effort": "medium", "description": "Medium reasoning" },
+        { "effort": "high", "description": "High reasoning" },
+        { "effort": "xhigh", "description": "Extra-high reasoning" },
+        { "effort": "max", "description": "Maximum reasoning" }
+      ],
+      "shell_type": "disabled",
+      "visibility": "list",
+      "supported_in_api": true,
+      "priority": 1,
+      "additional_speed_tiers": ["fast"],
+      "service_tiers": [
+        {
+          "id": "priority",
+          "name": "Fast",
+          "description": "1.5x speed, increased usage"
+        }
+      ],
+      "default_service_tier": null,
+      "availability_nux": null,
+      "upgrade": null,
+      "include_skills_usage_instructions": false,
+      "default_reasoning_summary": "none",
+      "support_verbosity": true,
+      "default_verbosity": "low",
+      "apply_patch_tool_type": null,
+      "web_search_tool_type": "text",
+      "truncation_policy": { "mode": "tokens", "limit": 10000 },
+      "supports_parallel_tool_calls": false,
+      "supports_image_detail_original": false,
+      "experimental_supported_tools": [],
+      "input_modalities": ["text"],
+      "supports_search_tool": false,
+      "use_responses_lite": true,
+      "tool_mode": "direct",
+      "multi_agent_version": null
+    }
+  ]
+}

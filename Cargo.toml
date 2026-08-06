@@ -1,0 +1,88 @@
+[package]
+name = "model-rocket"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94.1"
+description = "A local Claude Code model router for Anthropic and GPT subscription models"
+license = "Apache-2.0"
+repository = "https://github.com/laurencehook-lr/model-rocket"
+readme = "README.md"
+publish = false
+
+[features]
+test-support = []
+
+[dependencies]
+axum = { version = "=0.8.8", features = ["http1", "json", "tokio"] }
+base64 = "=0.22.1"
+futures-util = { version = "=0.3.32", default-features = false, features = ["std"] }
+reqwest = { version = "=0.13.4", default-features = false, features = ["rustls", "stream"] }
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = { version = "=1.0.149", features = ["raw_value"] }
+sha2 = "=0.10.9"
+subtle = "=2.6.1"
+tiktoken-rs = "=0.12.0"
+tokio = { version = "=1.51.1", features = ["io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tracing = "=0.1.44"
+tracing-subscriber = { version = "=0.3.23", features = ["env-filter", "fmt"] }
+uuid = { version = "=1.18.1", features = ["v7"] }
+
+[dev-dependencies]
+proc-macro2 = "=1.0.107"
+syn = { version = "=2.0.119", features = ["extra-traits", "full", "visit"] }
+tokio = { version = "=1.51.1", features = ["test-util"] }
+tower = { version = "=0.5.3", features = ["util"] }
+zstd = "=0.13.3"
+
+[[test]]
+name = "agent_config"
+required-features = ["test-support"]
+
+[[test]]
+name = "anthropic_http_boundary"
+required-features = ["test-support"]
+
+[[test]]
+name = "app_server_process"
+required-features = ["test-support"]
+
+[[test]]
+name = "config_security"
+required-features = ["test-support"]
+
+[[test]]
+name = "http_contract"
+required-features = ["test-support"]
+
+[[test]]
+name = "real_codex_tool_surface"
+required-features = ["test-support"]
+
+[lints.rust]
+unsafe_code = "forbid"
+future_incompatible = { level = "deny", priority = -1 }
+rust_2018_idioms = { level = "deny", priority = -1 }
+unused = { level = "deny", priority = -1 }
+nonstandard_style = { level = "deny", priority = -1 }
+unexpected_cfgs = "deny"
+non_ascii_idents = "deny"
+unreachable_pub = "deny"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+dbg_macro = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
+indexing_slicing = "deny"
+wildcard_imports = "deny"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+strip = "symbols"

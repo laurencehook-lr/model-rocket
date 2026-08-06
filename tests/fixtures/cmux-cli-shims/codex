@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "launcher invoked the PATH Codex shim" >&2
+exit 87

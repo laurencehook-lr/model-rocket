@@ -56,7 +56,10 @@ impl AnthropicHeader {
         {
             return Err(HeaderError::InvalidName);
         }
-        if value.iter().any(|byte| matches!(byte, b'\r' | b'\n' | 0)) {
+        if value
+            .iter()
+            .any(|byte| (*byte < b' ' && *byte != b'\t') || *byte == b'\x7f')
+        {
             return Err(HeaderError::InvalidValue);
         }
         Ok(Self { name, value })
@@ -258,3 +261,19 @@ impl fmt::Display for AnthropicStatusError {
 }
 
 impl std::error::Error for AnthropicStatusError {}
+
+#[cfg(test)]
+mod tests {
+    use super::AnthropicHeader;
+
+    #[test]
+    fn header_value_allows_horizontal_tab_but_rejects_c0_and_del() {
+        assert!(AnthropicHeader::new("x-test", b"value\tvalue".as_slice()).is_ok());
+        for byte in 0_u8..=0x1f {
+            if byte != b'\t' {
+                assert!(AnthropicHeader::new("x-test", vec![byte]).is_err());
+            }
+        }
+        assert!(AnthropicHeader::new("x-test", vec![0x7f]).is_err());
+    }
+}

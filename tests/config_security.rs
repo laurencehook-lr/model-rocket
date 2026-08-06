@@ -31,7 +31,7 @@ fn short_local_bearer_fails_closed() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
-fn alternate_gpt_model_fails_closed() -> Result<(), Box<dyn std::error::Error>> {
+fn unknown_model_is_not_routable() -> Result<(), Box<dyn std::error::Error>> {
     let configured = config("127.0.0.1:8765", "01234567890123456789012345678901")?;
     assert!(configured.catalogue().route_for("gpt-other").is_none());
     Ok(())

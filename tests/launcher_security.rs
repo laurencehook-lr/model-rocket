@@ -304,7 +304,6 @@ fn launcher_rejects_lower_model_overrides() -> Result<(), Box<dyn std::error::Er
         r#"{"modelOverrides":{"claude-fable-5":"unexpected-route"}}"#,
     )?;
     let canonical_settings_path = settings_path.canonicalize()?;
-
     let output = Command::new(root.join("scripts/model-rocket"))
         .current_dir(&caller_directory)
         .env(

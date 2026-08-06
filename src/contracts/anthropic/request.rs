@@ -7,9 +7,9 @@ use crate::{
     domain::BridgeError,
     domain::{
         AnthropicOperation, AnthropicRequest, AnthropicRequestBody, ClaudeSessionId,
-        ModelCatalogue, ModelRequest, PresentedCredential, RequestedModelId,
+        ModelCatalogue, ModelRequest, ModelRoute, PresentedCredential, RequestedModelId,
     },
-    policies::{http_limits::MAX_NON_STREAM_RESPONSE_BYTES, model_routing::MODEL_CREATED_AT},
+    policies::model_routing::MODEL_CREATED_AT,
 };
 
 use super::{
@@ -52,11 +52,7 @@ pub fn decode_message(
         let request: MessagesRequest = serde_json::from_slice(body).map_err(|error| {
             BridgeError::invalid_request(format!("invalid request body: {error}"))
         })?;
-        if !request.stream && u64::from(request.max_tokens) > MAX_NON_STREAM_RESPONSE_BYTES as u64 {
-            return Err(BridgeError::invalid_request(format!(
-                "non-stream max_tokens exceeds {MAX_NON_STREAM_RESPONSE_BYTES}-byte response limit"
-            )));
-        }
+        validate_output_token_policy(request.max_tokens, route, catalogue)?;
         let session = headers
             .get(CLAUDE_SESSION_HEADER)
             .and_then(|value| value.to_str().ok())
@@ -95,6 +91,30 @@ pub fn decode_message(
         "unsupported model {}",
         envelope.model
     )))
+}
+
+fn validate_output_token_policy(
+    requested: u32,
+    route: &ModelRoute,
+    catalogue: &ModelCatalogue,
+) -> Result<(), BridgeError> {
+    let model = catalogue
+        .models()
+        .iter()
+        .find(|model| model.id() == &route.codex_model)
+        .ok_or_else(|| {
+            BridgeError::protocol(format!(
+                "route {} references a model absent from the validated catalogue",
+                route.claude_model.as_str()
+            ))
+        })?;
+    let available = model.context_tokens().get();
+    if u64::from(requested) > available {
+        return Err(BridgeError::invalid_request(format!(
+            "max_tokens {requested} exceeds the configured model context window of {available} tokens"
+        )));
+    }
+    Ok(())
 }
 
 /// Decodes and validates one Anthropic-compatible model-list request.

@@ -2,8 +2,9 @@ use futures_util::StreamExt;
 
 use crate::{
     contracts::anthropic::{
-        ANTHROPIC_BASE_URL, body_stream_ended, build_reqwest_request, client_build_failed,
-        invalid_base_url, redirect_rejected, request_failed, response_head,
+        ANTHROPIC_BASE_URL, AnthropicBodyAccumulator, body_stream_ended, build_reqwest_request,
+        client_build_failed, invalid_base_url, redirect_rejected, request_failed, response_head,
+        streams_response,
     },
     domain::BridgeError,
     domain::{AnthropicRequest, AnthropicResponseChunk},
@@ -39,6 +40,7 @@ impl AnthropicGateway for ReqwestAnthropicGateway {
         output: &'a dyn AnthropicResponseSink,
     ) -> PortFuture<'a, ()> {
         Box::pin(async move {
+            let streaming = streams_response(&request)?;
             let parts = build_reqwest_request(&self.base_url, &request)?;
             let response = self
                 .client
@@ -51,15 +53,25 @@ impl AnthropicGateway for ReqwestAnthropicGateway {
             if response.status().is_redirection() {
                 return Err(redirect_rejected());
             }
-            output
-                .start(response_head(response.status(), response.headers())?)
-                .await?;
+            let head = response_head(response.status(), response.headers())?;
             let mut body = response.bytes_stream();
-            while let Some(chunk) = body.next().await {
-                let chunk = chunk.map_err(body_stream_ended)?;
-                output
-                    .emit(AnthropicResponseChunk::new(chunk.to_vec()))
-                    .await?;
+            if streaming {
+                output.start(head).await?;
+                while let Some(chunk) = body.next().await {
+                    let chunk = chunk.map_err(body_stream_ended)?;
+                    output
+                        .emit(AnthropicResponseChunk::new(chunk.to_vec()))
+                        .await?;
+                }
+            } else {
+                let mut aggregate = AnthropicBodyAccumulator::default();
+                while let Some(chunk) = body.next().await {
+                    aggregate.push(&chunk.map_err(body_stream_ended)?)?;
+                }
+                output.start(head).await?;
+                if let Some(chunk) = aggregate.finish() {
+                    output.emit(chunk).await?;
+                }
             }
             Ok(())
         })

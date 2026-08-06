@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import json
+import pathlib
+import re
 import sys
 
 
@@ -27,6 +29,18 @@ def complete_batch(batch):
         send({"method": "turn/completed", "params": {"threadId": thread_id, "turn": {"id": turn_id, "status": "completed", "items": []}}})
 
 
+limits_source = (
+    pathlib.Path(__file__).resolve().parents[2]
+    / "src"
+    / "policies"
+    / "router_limits.rs"
+).read_text(encoding="utf-8")
+limit_match = re.search(r"MAX_CONCURRENT_GPT_TURNS: usize = ([0-9]+);", limits_source)
+if limit_match is None:
+    raise RuntimeError("cannot read MAX_CONCURRENT_GPT_TURNS from router policy")
+max_concurrent_turns = int(limit_match.group(1))
+
+
 thread_counter = 0
 pending_turns = []
 for raw_line in sys.stdin:
@@ -48,8 +62,11 @@ for raw_line in sys.stdin:
         thread_id = message["params"]["threadId"]
         turn_id = "turn_" + thread_id.removeprefix("thread_")
         pending_turns.append((request_id, thread_id, turn_id))
-        if len(pending_turns) == 64:
+        if len(pending_turns) == max_concurrent_turns:
             complete_batch(pending_turns)
             pending_turns = []
     else:
         send({"id": request_id, "error": {"code": -32601, "message": "unknown method"}})
+
+if pending_turns:
+    complete_batch(pending_turns)

@@ -6,7 +6,34 @@ import os
 import signal
 import socketserver
 import sys
-import time
+
+
+ambient_forbidden = (
+    "OPENAI_API_KEY",
+    "AZURE_OPENAI_API_KEY",
+    "OPENAI_BASE_URL",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+    "GITHUB_TOKEN",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "MODEL_ROCKET_BRIDGE_BIN",
+)
+ambient_leaks = [name for name in ambient_forbidden if os.environ.get(name)]
+if ambient_leaks:
+    sys.stderr.write(
+        "bridge command inherited forbidden environment: "
+        + ",".join(ambient_leaks)
+        + "\n"
+    )
+    sys.exit(72)
 
 
 if len(sys.argv) > 1 and sys.argv[1] == "launcher-contract":
@@ -122,16 +149,17 @@ if len(sys.argv) > 1 and sys.argv[1] == "validate-settings":
 
 
 if len(sys.argv) == 3 and sys.argv[1] == "validate-claude":
-    claude_path = sys.argv[2]
+    claude_path = os.path.realpath(sys.argv[2])
     with open(claude_path, "rb") as claude_handle:
         digest = hashlib.sha256(claude_handle.read()).hexdigest()
     expected = os.environ.get(
         "MODEL_ROCKET_TEST_CLAUDE_SHA256",
-        "db5992fa43cde78ddd0ce6c0a382ea26e5804f9b1228583400106f73aff88ce5",
+        "2fccb13b36969fd07b3ca1788c813f52749cc62024b50072a484bedff8ca4fa6",
     )
     if digest != expected:
         sys.stderr.write("configuration error: Claude Code executable digest changed\n")
         sys.exit(1)
+    print(claude_path)
     sys.exit(0)
 
 
@@ -199,7 +227,6 @@ class Server(socketserver.TCPServer):
     allow_reuse_address = False
 
 
-time.sleep(6)
 server = Server(("127.0.0.1", 0), Handler)
 ready_file = os.environ["MODEL_ROCKET_READY_FILE"]
 with open(ready_file, "w", encoding="utf-8") as ready:

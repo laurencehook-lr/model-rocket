@@ -19,14 +19,6 @@ pub fn body_stream_ended(error: impl std::fmt::Display) -> BridgeError {
     BridgeError::anthropic_unavailable(format!("Anthropic response stream failed: {error}"))
 }
 
-pub fn header_conversion_failed(error: impl std::fmt::Display) -> BridgeError {
-    BridgeError::anthropic_unavailable(format!("invalid Anthropic response header: {error}"))
-}
-
-pub fn invalid_status(error: impl std::fmt::Display) -> BridgeError {
-    BridgeError::anthropic_unavailable(format!("invalid Anthropic response status: {error}"))
-}
-
 pub fn client_build_failed(error: impl std::fmt::Display) -> BridgeError {
     BridgeError::configuration(format!("cannot build Anthropic HTTP client: {error}"))
 }

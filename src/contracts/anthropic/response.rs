@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use crate::{
     contracts::json as json_contract,
     domain::BridgeError,
-    domain::{AssistantOutcome, CompletionCause, TokenUsage},
+    domain::{AnthropicResponseChunk, AssistantOutcome, CompletionCause, TokenUsage},
     policies::http_limits::MAX_NON_STREAM_RESPONSE_BYTES,
 };
 
@@ -169,6 +169,40 @@ impl ResponseSequence {
 pub struct MessageAccumulator {
     model: String,
     text: String,
+}
+
+#[derive(Default)]
+pub struct AnthropicBodyAccumulator {
+    body: Vec<u8>,
+}
+
+impl AnthropicBodyAccumulator {
+    /// Appends one upstream chunk to a bounded non-stream response.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error before the aggregate response can exceed its byte limit.
+    pub fn push(&mut self, chunk: &[u8]) -> Result<(), BridgeError> {
+        let next_len = self.body.len().checked_add(chunk.len()).ok_or_else(|| {
+            BridgeError::anthropic_unavailable("Anthropic non-stream response length overflowed")
+        })?;
+        if next_len > MAX_NON_STREAM_RESPONSE_BYTES {
+            return Err(BridgeError::anthropic_unavailable(format!(
+                "Anthropic non-stream response exceeds {MAX_NON_STREAM_RESPONSE_BYTES} bytes"
+            )));
+        }
+        self.body.extend_from_slice(chunk);
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn finish(self) -> Option<AnthropicResponseChunk> {
+        if self.body.is_empty() {
+            None
+        } else {
+            Some(AnthropicResponseChunk::new(self.body))
+        }
+    }
 }
 
 impl MessageAccumulator {
@@ -351,5 +385,42 @@ fn insert_usage(value: &mut Value, usage: Option<TokenUsage>) {
                 "output_tokens": usage.output().get()
             }),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::policies::http_limits::MAX_NON_STREAM_RESPONSE_BYTES;
+
+    use super::AnthropicBodyAccumulator;
+
+    #[test]
+    fn anthropic_body_accumulator_rejects_aggregate_over_limit()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut body = AnthropicBodyAccumulator::default();
+        body.push(&vec![b'x'; MAX_NON_STREAM_RESPONSE_BYTES])?;
+        let error = body
+            .push(b"x")
+            .err()
+            .ok_or_else(|| std::io::Error::other("oversized response was accepted"))?;
+        assert!(
+            error
+                .to_string()
+                .contains("Anthropic non-stream response exceeds 8388608 bytes")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn anthropic_body_accumulator_preserves_exact_chunks() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let mut body = AnthropicBodyAccumulator::default();
+        body.push(b"first")?;
+        body.push(b"-second")?;
+        let body = body
+            .finish()
+            .ok_or_else(|| std::io::Error::other("missing accumulated response"))?;
+        assert_eq!(body.as_bytes(), b"first-second");
+        Ok(())
     }
 }

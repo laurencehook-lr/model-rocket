@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, hash_map::Entry},
     env, fs,
     os::unix::fs::{PermissionsExt, symlink},
     path::{Path, PathBuf},
@@ -23,8 +23,8 @@ use crate::{
     contracts::codex::{
         self, diagnostics as d,
         messages::{
-            self as m, RpcMessage, TurnStatus, agent_message_delta, app_server_error,
-            parse_tool_call, token_usage, turn_status, validate_item_lifecycle,
+            self as m, JsonRpcRequestId, RpcMessage, TurnStatus, agent_message_delta,
+            app_server_error, parse_tool_call, token_usage, turn_status, validate_item_lifecycle,
         },
         tool_names::DynamicToolNames,
     },
@@ -77,7 +77,7 @@ enum TurnReadPhase {
 }
 
 struct AppServerContinuation {
-    pub rpc: Value,
+    pub rpc: JsonRpcRequestId,
     pub thread: String,
     pub turn: String,
 }
@@ -136,6 +136,7 @@ struct AppServerConnection {
     pending_requests: Mutex<HashMap<u64, oneshot::Sender<Result<RpcMessage, BridgeError>>>>,
     thread_senders: RwLock<HashMap<String, mpsc::UnboundedSender<Result<RpcMessage, BridgeError>>>>,
     alive: AtomicBool,
+    failure: OnceLock<BridgeError>,
     provider_override: Option<String>,
 }
 
@@ -197,26 +198,33 @@ impl IsolatedCodexHome {
             uuid::Uuid::now_v7(),
         ));
         fs::create_dir(&path).map_err(|error| d::configuration(d::CREATE_HOME_CONTEXT, error))?;
-        fs::set_permissions(&path, fs::Permissions::from_mode(ISOLATED_HOME_MODE))
-            .map_err(|error| d::configuration(d::SECURE_HOME_CONTEXT, error))?;
-        if let Err(error) = symlink(&source_auth, path.join(d::AUTH_FILE)) {
-            let _cleanup = fs::remove_dir(&path);
+        let isolated_home = Self { path };
+        fs::set_permissions(
+            &isolated_home.path,
+            fs::Permissions::from_mode(ISOLATED_HOME_MODE),
+        )
+        .map_err(|error| d::configuration(d::SECURE_HOME_CONTEXT, error))?;
+        if let Err(error) = symlink(&source_auth, isolated_home.path.join(d::AUTH_FILE)) {
             return Err(d::configuration(d::EXPOSE_AUTH_CONTEXT, error));
         }
-        if let Err(error) = fs::write(path.join(d::CONFIG_FILE), codex::ISOLATED_CONFIG) {
-            let _cleanup = fs::remove_dir_all(&path);
+        if let Err(error) = fs::write(
+            isolated_home.path.join(d::CONFIG_FILE),
+            codex::ISOLATED_CONFIG,
+        ) {
             return Err(d::configuration(d::WRITE_CONFIG_CONTEXT, error));
         }
         if let Some(catalogue) = catalogue {
             let model_catalog = m::restricted_model_catalog(catalogue)?;
             let encoded_catalog = serde_json::to_vec(&model_catalog)
                 .map_err(|error| d::configuration(d::ENCODE_CATALOG_CONTEXT, error))?;
-            if let Err(error) = fs::write(path.join(d::MODEL_CATALOG_FILE), encoded_catalog) {
-                let _cleanup = fs::remove_dir_all(&path);
+            if let Err(error) = fs::write(
+                isolated_home.path.join(d::MODEL_CATALOG_FILE),
+                encoded_catalog,
+            ) {
                 return Err(d::configuration(d::WRITE_CATALOG_CONTEXT, error));
             }
         }
-        Ok(Self { path })
+        Ok(isolated_home)
     }
 }
 
@@ -403,6 +411,7 @@ impl AppServerConnection {
             pending_requests: Mutex::new(HashMap::new()),
             thread_senders: RwLock::new(HashMap::new()),
             alive: AtomicBool::new(CONNECTION_ALIVE_AT_START),
+            failure: OnceLock::new(),
             provider_override,
         });
         let weak = Arc::downgrade(&connection);
@@ -578,10 +587,9 @@ impl CodexRuntime {
                     let status = turn_status(&message, expected)?;
                     return self.complete_turn(status, &mut progress, output).await;
                 }
-                Some(method) if message.id.is_some() => {
-                    return Err(d::unsupported_method(method));
-                }
-                Some(_) | None => {}
+                Some(method) if message.id.is_some() => return Err(d::unsupported_method(method)),
+                Some(method) => return Err(m::unsupported_notification(method)),
+                None => return Err(m::missing_message_method()),
             }
         }
     }
@@ -785,6 +793,13 @@ impl AppServerConnection {
         self.alive.load(Ordering::Acquire)
     }
 
+    fn connection_error(&self) -> BridgeError {
+        self.failure
+            .get()
+            .cloned()
+            .unwrap_or_else(|| BridgeError::unavailable(d::CONNECTION_STOPPED))
+    }
+
     async fn initialize(&self) -> Result<(), BridgeError> {
         self.request(m::INITIALIZE_METHOD, m::initialize_params())
             .await?;
@@ -802,7 +817,7 @@ impl AppServerConnection {
         {
             let mut pending = self.pending_requests.lock().await;
             if !self.is_alive() {
-                return Err(BridgeError::unavailable(d::CONNECTION_STOPPED));
+                return Err(self.connection_error());
             }
             if pending.insert(id, sender).is_some() {
                 return Err(BridgeError::protocol(d::REQUEST_ID_REUSED));
@@ -831,7 +846,7 @@ impl AppServerConnection {
 
     async fn send(&self, value: Value) -> Result<(), BridgeError> {
         if !self.is_alive() {
-            return Err(BridgeError::unavailable(d::CONNECTION_STOPPED));
+            return Err(self.connection_error());
         }
         let bytes = m::encode_message(&value)?;
         let result = {
@@ -854,18 +869,17 @@ impl AppServerConnection {
         thread_id: &str,
     ) -> Result<mpsc::UnboundedReceiver<Result<RpcMessage, BridgeError>>, BridgeError> {
         if !self.is_alive() {
-            return Err(BridgeError::unavailable(d::CONNECTION_STOPPED));
+            return Err(self.connection_error());
         }
         let (sender, receiver) = mpsc::unbounded_channel();
-        if self
-            .thread_senders
-            .write()
-            .await
-            .insert(thread_id.to_owned(), sender)
-            .is_some()
-        {
-            return Err(BridgeError::protocol(d::THREAD_ID_REUSED));
+        let mut threads = self.thread_senders.write().await;
+        match threads.entry(thread_id.to_owned()) {
+            Entry::Vacant(entry) => {
+                entry.insert(sender);
+            }
+            Entry::Occupied(_) => return Err(BridgeError::protocol(d::THREAD_ID_REUSED)),
         }
+        drop(threads);
         Ok(receiver)
     }
 
@@ -899,7 +913,7 @@ impl AppServerConnection {
             let id = message
                 .id
                 .as_ref()
-                .and_then(Value::as_u64)
+                .and_then(JsonRpcRequestId::as_u64)
                 .ok_or_else(|| BridgeError::protocol(d::RESPONSE_ID_MISSING))?;
             let sender = self
                 .pending_requests
@@ -944,13 +958,17 @@ impl AppServerConnection {
         if let Some(method) = message.method.as_deref().filter(|_| message.id.is_some()) {
             return Err(d::unsupported_method(method));
         }
-        Ok(())
+        match message.method.as_deref() {
+            Some(method) => Err(m::unsupported_notification(method)),
+            None => Err(m::missing_message_method()),
+        }
     }
 
     async fn fail(&self, error: BridgeError) {
         if !self.alive.swap(CONNECTION_FAILED_STATE, Ordering::AcqRel) {
             return;
         }
+        let _stored = self.failure.set(error.clone());
         if let Err(kill_error) = self.child.lock().await.start_kill() {
             d::warn_process_kill(kill_error);
         }

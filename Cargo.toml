@@ -22,7 +22,7 @@ serde_json = { version = "=1.0.149", features = ["raw_value"] }
 sha2 = "=0.10.9"
 subtle = "=2.6.1"
 tiktoken-rs = "=0.12.0"
-tokio = { version = "=1.51.1", features = ["io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "test-util", "time"] }
+tokio = { version = "=1.51.1", features = ["io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 tracing = "=0.1.44"
 tracing-subscriber = { version = "=0.3.23", features = ["env-filter", "fmt"] }
 uuid = { version = "=1.18.1", features = ["v7"] }
@@ -30,6 +30,7 @@ uuid = { version = "=1.18.1", features = ["v7"] }
 [dev-dependencies]
 proc-macro2 = "=1.0.107"
 syn = { version = "=2.0.119", features = ["extra-traits", "full", "visit"] }
+tokio = { version = "=1.51.1", features = ["test-util"] }
 tower = { version = "=0.5.3", features = ["util"] }
 zstd = "=0.13.3"
 

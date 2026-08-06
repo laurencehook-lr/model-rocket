@@ -36,6 +36,8 @@ for raw_line in sys.stdin:
         if params.get("turnId") != "turn_overflow":
             raise RuntimeError("turn/interrupt used the wrong turn ID")
         send({"id": request_id, "result": {}})
+        usage = {"inputTokens": 12, "cachedInputTokens": 0, "outputTokens": 2, "reasoningOutputTokens": 0, "totalTokens": 14}
+        send({"method": "thread/tokenUsage/updated", "params": {"threadId": "thread_overflow", "turnId": "turn_overflow", "tokenUsage": {"last": usage, "total": usage, "modelContextWindow": 1000000}}})
         send({"method": "turn/completed", "params": {"threadId": "thread_overflow", "turn": {"id": "turn_overflow", "status": "interrupted", "items": []}}})
     else:
         send({"id": request_id, "error": {"code": -32601, "message": "unknown method"}})

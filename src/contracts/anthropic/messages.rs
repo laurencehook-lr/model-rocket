@@ -63,6 +63,7 @@ pub(super) enum ToolResultTextBlock {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct Tool {
     pub name: String,
     #[serde(default)]
@@ -553,5 +554,28 @@ impl ToolResultContent {
                 .collect::<Vec<_>>()
                 .join("\n"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MessagesRequest;
+
+    #[test]
+    fn tool_definition_rejects_unsupported_extra_fields() {
+        let request = serde_json::from_str::<MessagesRequest>(
+            r#"{
+                "model":"anthropic-model-rocket-gpt-5.6-sol-normal-high",
+                "max_tokens":100,
+                "messages":[],
+                "tools":[{
+                    "name":"weather",
+                    "description":"Get weather",
+                    "input_schema":{"type":"object"},
+                    "cache_control":{"type":"ephemeral"}
+                }]
+            }"#,
+        );
+        assert!(request.is_err());
     }
 }

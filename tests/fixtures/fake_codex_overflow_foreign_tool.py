@@ -36,6 +36,11 @@ for raw_line in sys.stdin:
         send({"id": request_id, "result": {"turn": {"id": "turn_overflow_tool"}}})
         send({"method": "item/agentMessage/delta", "params": {"delta": "éstreamed beyond limit", "itemId": "item_overflow_tool", "threadId": "thread_overflow_tool", "turnId": "turn_overflow_tool"}})
     elif method == "turn/interrupt":
+        params = message.get("params", {})
+        if params.get("threadId") != "thread_overflow_tool":
+            raise RuntimeError("turn/interrupt used the wrong thread ID")
+        if params.get("turnId") != "turn_overflow_tool":
+            raise RuntimeError("turn/interrupt used the wrong turn ID")
         send({"id": request_id, "result": {}})
         send({"id": "foreign_tool_rpc", "method": "item/tool/call", "params": {"arguments": {}, "callId": "foreign_call", "threadId": "foreign_thread", "tool": tool_name, "turnId": "foreign_turn"}})
     else:

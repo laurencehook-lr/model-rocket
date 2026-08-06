@@ -2,8 +2,8 @@ use std::{collections::HashSet, fs, path::Path, path::PathBuf};
 
 use proc_macro2::{TokenStream, TokenTree};
 use syn::{
-    Expr, Fields, File, GenericParam, ImplItem, Item, ItemTrait, ItemUse, Lit, Macro, Pat,
-    TraitItem, UseTree, Visibility, visit, visit::Visit,
+    Expr, Fields, File, FnArg, GenericParam, ImplItem, Item, ItemTrait, ItemUse, Lit, Macro, Pat,
+    TraitItem, Type, UseTree, Visibility, visit, visit::Visit,
 };
 
 const PORT_FILE: &str = "src/ports.rs";
@@ -1450,6 +1450,64 @@ fn exact_port_gate_rejects_missing_or_extra_methods() -> Result<(), Box<dyn std:
     Ok(())
 }
 
+fn validate_app_server_launch_capability(adapter: &File) -> Result<(), Box<dyn std::error::Error>> {
+    let launch_methods = adapter
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Impl(item_impl) => Some(item_impl),
+            _ => None,
+        })
+        .filter(|item_impl| match item_impl.self_ty.as_ref() {
+            Type::Path(path) => path
+                .path
+                .segments
+                .last()
+                .is_some_and(|segment| segment.ident == "AppServer"),
+            _ => false,
+        })
+        .flat_map(|item_impl| &item_impl.items)
+        .filter_map(|item| match item {
+            ImplItem::Fn(method) if method.sig.ident == "launch" => Some(method),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        launch_methods.len(),
+        1,
+        "AppServer must expose exactly one inherent launch method"
+    );
+    let launch = launch_methods
+        .first()
+        .ok_or("AppServer::launch is missing")?;
+    assert!(matches!(launch.vis, Visibility::Public(_)));
+    assert!(launch.sig.asyncness.is_some());
+    let executable = launch
+        .sig
+        .inputs
+        .first()
+        .ok_or("AppServer::launch has no executable argument")?;
+    let FnArg::Typed(executable) = executable else {
+        return Err("AppServer::launch must not take self".into());
+    };
+    let Type::Reference(reference) = executable.ty.as_ref() else {
+        return Err("AppServer::launch executable must be borrowed".into());
+    };
+    let Type::Path(executable_type) = reference.elem.as_ref() else {
+        return Err("AppServer::launch executable must use a named capability".into());
+    };
+    assert_eq!(
+        executable_type
+            .path
+            .segments
+            .last()
+            .map(|segment| segment.ident.to_string())
+            .as_deref(),
+        Some("ValidatedCodexExecutable")
+    );
+    Ok(())
+}
+
 #[test]
 fn production_executable_capability_cannot_be_forged_or_bypassed()
 -> Result<(), Box<dyn std::error::Error>> {
@@ -1512,12 +1570,8 @@ fn production_executable_capability_cannot_be_forged_or_bypassed()
         "production Config fields must remain private"
     );
 
-    let adapter = fs::read_to_string("src/adapters/outbound/codex/mod.rs")?;
-    assert!(
-        adapter.contains("pub async fn launch(\n        executable: &ValidatedCodexExecutable,")
-    );
-    assert!(!adapter.contains("pub async fn launch(codex_bin"));
-    assert!(!adapter.contains("pub fn new(codex_bin"));
+    let adapter = parse(Path::new("src/adapters/outbound/codex/mod.rs"))?;
+    validate_app_server_launch_capability(&adapter)?;
 
     let config_source = fs::read_to_string("src/config.rs")?;
     assert!(config_source.contains("#[cfg(feature = \"test-support\")]\n    pub fn test_fixture("));

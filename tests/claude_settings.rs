@@ -71,6 +71,22 @@ fn rejects_malformed_settings() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
+fn rejects_oversized_settings_without_unbounded_reading() -> Result<(), Box<dyn std::error::Error>>
+{
+    let directory = scratch_directory("oversized");
+    fs::create_dir_all(&directory)?;
+    let settings = directory.join("settings.json");
+    fs::write(&settings, vec![b' '; 1024 * 1024 + 1])?;
+
+    let result = claude_settings::validate([&settings]);
+    fs::remove_dir_all(directory)?;
+
+    let error = result.err().ok_or("oversized settings were accepted")?;
+    assert!(error.to_string().contains("settings exceed 1048576 bytes"));
+    Ok(())
+}
+
+#[test]
 fn rejects_disabled_hooks() -> Result<(), Box<dyn std::error::Error>> {
     let directory = scratch_directory("disabled-hooks");
     fs::create_dir_all(&directory)?;
@@ -136,6 +152,25 @@ fn config_change_guard_allows_safe_settings() -> Result<(), Box<dyn std::error::
     fs::remove_dir_all(directory)?;
 
     assert!(output.is_empty());
+    Ok(())
+}
+
+#[test]
+fn config_change_guard_blocks_oversized_input() -> Result<(), Box<dyn std::error::Error>> {
+    let mut output = Vec::new();
+    claude_settings::guard_config_change(vec![b' '; 1024 * 1024 + 1].as_slice(), &mut output)?;
+
+    let decision: Value = serde_json::from_slice(&output)?;
+    assert_eq!(
+        decision.get("decision").and_then(Value::as_str),
+        Some("block")
+    );
+    assert!(
+        decision
+            .get("reason")
+            .and_then(Value::as_str)
+            .is_some_and(|reason| reason.contains("exceeds 1048576 bytes"))
+    );
     Ok(())
 }
 

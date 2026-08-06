@@ -49,8 +49,11 @@ jobs:
       - name: Install pinned Codex CLI
         run: |
           npm install --global @openai/codex@0.146.0
-          codex_native="$(find "$(npm root -g)/@openai/codex/node_modules/@openai" -type f -path '*/vendor/*/bin/codex' -print -quit)"
-          test -n "$codex_native"
+          codex_native="$(npm root -g)/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex"
+          test -x "$codex_native" || {
+            echo "Pinned Codex native binary is missing at $codex_native" >&2
+            exit 1
+          }
           install -d -m 700 "$HOME/.local/bin"
           install -m 755 "$codex_native" "$HOME/.local/bin/codex-native"
       - name: Create managed-auth test fixture

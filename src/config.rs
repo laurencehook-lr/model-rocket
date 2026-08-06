@@ -241,7 +241,7 @@ fn model_catalogue_path(
 ) -> Result<PathBuf, BridgeError> {
     let path = if let Some(configured) = configured {
         PathBuf::from(configured)
-    } else if let Some(xdg_config_home) = xdg_config_home {
+    } else if let Some(xdg_config_home) = xdg_config_home.filter(|value| !value.is_empty()) {
         PathBuf::from(xdg_config_home).join("model-rocket/model-routes.json")
     } else {
         PathBuf::from(home.ok_or_else(|| {
@@ -311,6 +311,20 @@ mod tests {
         assert!(
             model_catalogue_path(Some(OsString::from("model-routes.json")), None, None).is_err()
         );
+    }
+
+    #[test]
+    fn empty_xdg_config_home_uses_documented_home_fallback()
+    -> Result<(), Box<dyn std::error::Error>> {
+        assert_eq!(
+            model_catalogue_path(
+                None,
+                Some(OsString::new()),
+                Some(OsString::from("/Users/tester")),
+            )?,
+            PathBuf::from("/Users/tester/.config/model-rocket/model-routes.json")
+        );
+        Ok(())
     }
 
     #[test]

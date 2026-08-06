@@ -6,8 +6,11 @@ use axum::{
 };
 use futures_util::{StreamExt, future::join_all};
 use model_rocket::{
-    bootstrap, config::Config, domain::BridgeError,
-    policies::router_limits::MAX_CONCURRENT_GPT_TURNS, ports::ModelRouter,
+    bootstrap,
+    config::Config,
+    domain::{BridgeError, ModelCatalogue},
+    policies::router_limits::MAX_CONCURRENT_GPT_TURNS,
+    ports::ModelRouter,
 };
 use tokio::time::{Duration, timeout};
 use tower::ServiceExt;
@@ -15,29 +18,29 @@ use tower::ServiceExt;
 const BEARER: &str = "01234567890123456789012345678901";
 const ROUTE_MODEL: &str = "anthropic-model-rocket-gpt-5.6-sol-normal-high";
 
-fn test_model_router(config: &Config) -> Result<Arc<dyn ModelRouter>, BridgeError> {
-    bootstrap::model_router(config)
+struct TestRouterParts {
+    model_router: Arc<dyn ModelRouter>,
+    catalogue: Arc<ModelCatalogue>,
+}
+
+fn test_model_router(config: &Config) -> Result<TestRouterParts, BridgeError> {
+    Ok(TestRouterParts {
+        model_router: bootstrap::model_router(config)?,
+        catalogue: Arc::clone(config.catalogue()),
+    })
 }
 
 mod test_http {
-    use std::sync::Arc;
-
     use axum::Router;
-    use model_rocket::{bootstrap, config::Config, domain::BridgeError, ports::ModelRouter};
+    use model_rocket::{bootstrap, domain::BridgeError};
+
+    use super::TestRouterParts;
 
     pub(super) fn router(
-        model_router: Result<Arc<dyn ModelRouter>, BridgeError>,
+        parts: Result<TestRouterParts, BridgeError>,
     ) -> Result<Router, BridgeError> {
-        let config = Config::test_fixture(
-            "127.0.0.1:0".parse().map_err(|error| {
-                BridgeError::configuration(format!("invalid test listener: {error}"))
-            })?,
-            None,
-            std::path::Path::new("/usr/bin/true"),
-            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),
-            "01234567890123456789012345678901".to_owned(),
-        )?;
-        bootstrap::http_router(model_router?, Arc::clone(config.catalogue()))
+        let parts = parts?;
+        bootstrap::http_router(parts.model_router, parts.catalogue)
     }
 }
 
@@ -266,20 +269,20 @@ async fn reserved_mcp_tool_name_round_trips_through_safe_codex_alias()
 }
 
 #[tokio::test]
-async fn non_stream_request_rejects_output_limit_above_server_cap()
+async fn request_rejects_output_limit_above_model_context_window()
 -> Result<(), Box<dyn std::error::Error>> {
     let app = test_http::router(test_model_router(&config()?))?;
     let response = app
         .oneshot(request(&serde_json::json!({
             "model": ROUTE_MODEL,
             "max_tokens": u32::MAX,
-            "stream": false,
+            "stream": true,
             "messages": [{"role": "user", "content": "hello"}]
         }))?)
         .await?;
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let body = String::from_utf8(to_bytes(response.into_body(), 1024 * 1024).await?.to_vec())?;
-    assert!(body.contains("non-stream max_tokens exceeds 8388608-byte response limit"));
+    assert!(body.contains("exceeds the configured model context window of 272000 tokens"));
     Ok(())
 }
 
@@ -493,6 +496,7 @@ async fn every_route_enforces_its_service_tier_and_reasoning_effort()
         "ASSERT_ROUTE_FAST_HIGH",
     ];
     let configured = config()?;
+    assert_eq!(configured.catalogue().routes().len(), markers.len());
     for (route, marker) in configured.catalogue().routes().iter().zip(markers) {
         let app = test_http::router(test_model_router(&configured))?;
         let response = app
@@ -661,7 +665,8 @@ async fn max_tokens_is_enforced_as_a_strict_gpt_token_ceiling()
     assert!(body.contains(&expected_event));
     assert!(!body.contains("streamed beyond limit"));
     assert!(body.contains("\"stop_reason\":\"max_tokens\""));
-    assert_eq!(body.matches("\"usage\"").count(), 1);
+    assert!(body.contains("\"usage\":{\"input_tokens\":12,\"output_tokens\":2}"));
+    assert_eq!(body.matches("\"usage\"").count(), 2);
     Ok(())
 }
 
@@ -1293,7 +1298,7 @@ async fn two_model_routes_survive_shared_process_recovery_with_the_same_catalogu
     let _removed_stale_state = fs::remove_file(&recovery_state);
     let config =
         config_with_catalogue_fixture("fake_codex_two_model_recovery.py", &catalogue_path)?;
-    let app = bootstrap::http_router(test_model_router(&config)?, Arc::clone(config.catalogue()))?;
+    let app = test_http::router(test_model_router(&config))?;
 
     let first = app
         .clone()

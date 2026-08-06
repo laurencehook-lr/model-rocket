@@ -1,6 +1,6 @@
 //! Codex App Server JSON-RPC messages and validation.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::{
@@ -29,6 +29,12 @@ pub(crate) const EVENT_ITEM_STARTED: &str = "item/started";
 pub(crate) const EVENT_ITEM_COMPLETED: &str = "item/completed";
 pub(crate) const EVENT_ERROR: &str = "error";
 pub(crate) const EVENT_TURN_COMPLETED: &str = "turn/completed";
+pub(crate) const EVENT_ACCOUNT_RATE_LIMITS_UPDATED: &str = "account/rateLimits/updated";
+pub(crate) const EVENT_THREAD_STARTED: &str = "thread/started";
+pub(crate) const EVENT_TURN_STARTED: &str = "turn/started";
+pub(crate) const EVENT_REMOTE_CONTROL_STATUS_CHANGED: &str = "remoteControl/status/changed";
+pub(crate) const EVENT_THREAD_SETTINGS_UPDATED: &str = "thread/settings/updated";
+pub(crate) const EVENT_THREAD_STATUS_CHANGED: &str = "thread/status/changed";
 pub(crate) const STARTED_TIMESTAMP_FIELD: &str = "startedAtMs";
 pub(crate) const COMPLETED_TIMESTAMP_FIELD: &str = "completedAtMs";
 
@@ -211,7 +217,7 @@ pub(crate) fn started_turn_id(response: &Value) -> Result<String, BridgeError> {
         .ok_or_else(|| BridgeError::protocol("turn/start returned no turn id"))
 }
 
-pub(crate) fn tool_resolution(rpc_id: &Value, resolution: &ContinueModelTurn) -> Value {
+pub(crate) fn tool_resolution(rpc_id: &JsonRpcRequestId, resolution: &ContinueModelTurn) -> Value {
     serde_json::json!({
         "id": rpc_id,
         "result": {
@@ -219,6 +225,16 @@ pub(crate) fn tool_resolution(rpc_id: &Value, resolution: &ContinueModelTurn) ->
             "success": resolution.disposition() == ToolResultDisposition::Success,
         }
     })
+}
+
+pub(crate) fn unsupported_notification(method: &str) -> BridgeError {
+    BridgeError::protocol(format!(
+        "Codex App Server sent unsupported notification {method}"
+    ))
+}
+
+pub(crate) fn missing_message_method() -> BridgeError {
+    BridgeError::protocol("Codex App Server event has no method")
 }
 
 pub(crate) fn interrupt_params(thread_id: &str, turn_id: &str) -> Value {
@@ -232,7 +248,17 @@ pub(crate) fn initialize_params() -> Value {
             "title": "Model Rocket",
             "version": env!("CARGO_PKG_VERSION"),
         },
-        "capabilities": {"experimentalApi": true},
+        "capabilities": {
+            "experimentalApi": true,
+            "optOutNotificationMethods": [
+                EVENT_ACCOUNT_RATE_LIMITS_UPDATED,
+                EVENT_THREAD_STARTED,
+                EVENT_TURN_STARTED,
+                EVENT_REMOTE_CONTROL_STATUS_CHANGED,
+                EVENT_THREAD_SETTINGS_UPDATED,
+                EVENT_THREAD_STATUS_CHANGED,
+            ],
+        },
     })
 }
 
@@ -462,10 +488,51 @@ fn validate_optional_string_array(
     Ok(())
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(untagged)]
+pub(crate) enum JsonRpcRequestId {
+    Number(serde_json::Number),
+    String(String),
+}
+
+impl JsonRpcRequestId {
+    #[must_use]
+    pub(crate) fn as_u64(&self) -> Option<u64> {
+        match self {
+            Self::Number(value) => value.as_u64(),
+            Self::String(_) => None,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for JsonRpcRequestId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        match Value::deserialize(deserializer)? {
+            Value::Number(value) if value.is_i64() || value.is_u64() => Ok(Self::Number(value)),
+            Value::String(value) => Ok(Self::String(value)),
+            _ => Err(serde::de::Error::custom(
+                "JSON-RPC request id must be an integer or string",
+            )),
+        }
+    }
+}
+
+fn deserialize_optional_request_id<'de, D>(
+    deserializer: D,
+) -> Result<Option<JsonRpcRequestId>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    JsonRpcRequestId::deserialize(deserializer).map(Some)
+}
+
 #[derive(Debug, Deserialize)]
 pub(crate) struct RpcMessage {
-    #[serde(default)]
-    pub(crate) id: Option<Value>,
+    #[serde(default, deserialize_with = "deserialize_optional_request_id")]
+    pub(crate) id: Option<JsonRpcRequestId>,
     #[serde(default)]
     pub(crate) method: Option<String>,
     #[serde(default)]
@@ -493,7 +560,7 @@ struct DynamicToolCallParams {
 }
 
 pub(crate) struct ParsedToolCall {
-    pub(crate) rpc_id: Value,
+    pub(crate) rpc_id: JsonRpcRequestId,
     pub(crate) thread_id: String,
     pub(crate) turn_id: String,
     pub(crate) tool_call: ToolCall,
@@ -703,8 +770,11 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        RpcMessage, agent_message_delta, app_server_error, model_page, parse_tool_call,
-        token_usage, turn_status, validate_item_lifecycle,
+        EVENT_ACCOUNT_RATE_LIMITS_UPDATED, EVENT_REMOTE_CONTROL_STATUS_CHANGED,
+        EVENT_THREAD_SETTINGS_UPDATED, EVENT_THREAD_STARTED, EVENT_THREAD_STATUS_CHANGED,
+        EVENT_TURN_STARTED, JsonRpcRequestId, RpcMessage, agent_message_delta, app_server_error,
+        initialize_params, missing_message_method, model_page, parse_tool_call, token_usage,
+        turn_status, unsupported_notification, validate_item_lifecycle,
     };
     use crate::contracts::codex::tool_names::DynamicToolNames;
 
@@ -721,6 +791,65 @@ mod tests {
             .ok_or("non-string cursor must fail")?;
         assert!(error.to_string().contains("not a string or null"));
         Ok(())
+    }
+
+    #[test]
+    fn json_rpc_request_id_accepts_only_integer_or_string_ids()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let numeric: RpcMessage = serde_json::from_value(json!({"id": 7, "result": {}}))?;
+        assert_eq!(
+            numeric.id,
+            Some(JsonRpcRequestId::Number(serde_json::Number::from(7)))
+        );
+        let negative: RpcMessage = serde_json::from_value(json!({"id": -7, "result": {}}))?;
+        assert_eq!(
+            negative.id,
+            Some(JsonRpcRequestId::Number(serde_json::Number::from(-7)))
+        );
+        let string: RpcMessage =
+            serde_json::from_value(json!({"id": "tool-request", "method": "item/tool/call"}))?;
+        assert_eq!(
+            string.id,
+            Some(JsonRpcRequestId::String("tool-request".to_owned()))
+        );
+        for invalid in [json!(null), json!(true), json!(1.5), json!({}), json!([])] {
+            assert!(
+                serde_json::from_value::<RpcMessage>(json!({"id": invalid, "result": {}})).is_err(),
+                "invalid JSON-RPC request id was accepted"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn unsupported_or_methodless_notifications_have_explicit_protocol_errors() {
+        assert!(
+            unsupported_notification("thread/unknown")
+                .to_string()
+                .contains("unsupported notification thread/unknown")
+        );
+        assert!(
+            missing_message_method()
+                .to_string()
+                .contains("event has no method")
+        );
+    }
+
+    #[test]
+    fn initialization_suppresses_irrelevant_notifications() {
+        assert_eq!(
+            initialize_params()
+                .pointer("/capabilities/optOutNotificationMethods")
+                .and_then(Value::as_array),
+            Some(&vec![
+                Value::String(EVENT_ACCOUNT_RATE_LIMITS_UPDATED.to_owned()),
+                Value::String(EVENT_THREAD_STARTED.to_owned()),
+                Value::String(EVENT_TURN_STARTED.to_owned()),
+                Value::String(EVENT_REMOTE_CONTROL_STATUS_CHANGED.to_owned()),
+                Value::String(EVENT_THREAD_SETTINGS_UPDATED.to_owned()),
+                Value::String(EVENT_THREAD_STATUS_CHANGED.to_owned()),
+            ])
+        );
     }
 
     #[test]

@@ -120,7 +120,7 @@ Run this from any project directory:
 claude-gpt
 ```
 
-Model Rocket starts on Fable and shuts down its local bridge when Claude Code exits.
+Model Rocket starts on Fable by default and shuts down its local bridge when Claude Code exits.
 
 ## Switch models
 
@@ -151,7 +151,8 @@ The shipped catalogue therefore exposes `272,000` tokens for every GPT route.
 
 Claude Code saves a direct `/model` selection as the default for future sessions.
 Switch back to Anthropic before launching plain `claude` if needed.
-The `claude-gpt` launcher itself always starts on Fable.
+The `claude-gpt` launcher starts on Fable unless the caller sets `MODEL_ROCKET_DEFAULT_MODEL` to an exact configured model or route ID for that invocation.
+This override is intended for explicit automation such as the live smoke test; it is removed from Claude Code's environment before launch.
 
 ## Configure GPT models and routes
 

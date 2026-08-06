@@ -2,6 +2,7 @@
 set -euo pipefail
 
 for forbidden_name in \
+  MODEL_ROCKET_DEFAULT_MODEL \
   ANTHROPIC_API_KEY \
   ANTHROPIC_AUTH_TOKEN \
   ANTHROPIC_CUSTOM_HEADERS \
@@ -50,6 +51,10 @@ for forbidden_proxy_name in \
 done
 if [[ "${1:-}" == "--version" ]]; then
   if [[ "${MODEL_ROCKET_TEST_REPLACE_ON_VERSION:-}" == "1" ]]; then
+    if [[ "$0" == */tests/fixtures/launcher-bin/claude ]]; then
+      echo "Refusing to mutate the tracked Claude fixture" >&2
+      exit 88
+    fi
     printf '%s\n' '# replaced after version validation' >>"$0"
   fi
   printf '%s\n' "2.1.223 (Claude Code)"

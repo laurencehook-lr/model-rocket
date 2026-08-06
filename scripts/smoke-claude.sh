@@ -15,7 +15,8 @@ model="$($bridge_bin canonical-route)"
 
 response="$({
   MODEL_ROCKET_CWD="$isolated_cwd" \
-    "$script_dir/model-rocket" --model "$model" --print "Reply with exactly: model-rocket text smoke passed"
+    MODEL_ROCKET_DEFAULT_MODEL="$model" \
+    "$script_dir/model-rocket" --print "Reply with exactly: model-rocket text smoke passed"
 })"
 if [[ "$response" != *"model-rocket text smoke passed"* ]]; then
   echo "Claude smoke response did not contain the expected marker." >&2

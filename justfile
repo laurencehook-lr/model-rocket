@@ -55,10 +55,10 @@ verify-full:
     @just deny
 
 preflight:
-    MODEL_ROCKET_CONFIG="$PWD/config/model-routes.json" cargo run --locked -- preflight
+    MODEL_ROCKET_CONFIG="${MODEL_ROCKET_CONFIG:-$PWD/config/model-routes.json}" cargo run --locked -- preflight
 
 serve:
-    MODEL_ROCKET_CONFIG="$PWD/config/model-routes.json" cargo run --locked -- serve
+    MODEL_ROCKET_CONFIG="${MODEL_ROCKET_CONFIG:-$PWD/config/model-routes.json}" cargo run --locked -- serve
 
 smoke-claude:
-    MODEL_ROCKET_CONFIG="$PWD/config/model-routes.json" scripts/smoke-claude.sh
+    MODEL_ROCKET_CONFIG="${MODEL_ROCKET_CONFIG:-$PWD/config/model-routes.json}" scripts/smoke-claude.sh

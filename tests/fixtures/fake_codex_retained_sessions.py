@@ -35,11 +35,15 @@ for raw_line in sys.stdin:
         send({"id": request_id, "result": {"thread": {"id": thread_id}}})
     elif method == "turn/start":
         thread_id = message["params"]["threadId"]
+        if thread_id not in thread_tools:
+            raise RuntimeError("turn/start used an unregistered thread ID")
         turn_id = "turn_" + thread_id.removeprefix("thread_")
         prompt = message["params"]["input"][0]["text"]
         send({"id": request_id, "result": {"turn": {"id": turn_id, "status": "inProgress", "items": [], "error": None}}})
         if "CALL_TOOL" in prompt:
             tool_name = thread_tools[thread_id]
+            if not isinstance(tool_name, str) or not tool_name:
+                raise RuntimeError("CALL_TOOL requires a registered non-empty tool name")
             send({"id": "tool_rpc_" + thread_id, "method": "item/tool/call", "params": {"arguments": {"city": "London"}, "callId": "call_" + thread_id, "threadId": thread_id, "tool": tool_name, "turnId": turn_id}})
         else:
             item_id = "item_" + thread_id

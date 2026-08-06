@@ -1,9 +1,11 @@
 use std::{
     collections::BTreeMap,
-    fs,
+    fs::File,
     io::{Read, Write},
     path::{Path, PathBuf},
 };
+
+const MAX_SETTINGS_BYTES: u64 = 1024 * 1024;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -58,7 +60,14 @@ pub fn guard_config_change(
     mut output: impl Write,
 ) -> Result<(), BridgeError> {
     let mut encoded = Vec::new();
-    let decision = match input.read_to_end(&mut encoded) {
+    let decision = match input
+        .by_ref()
+        .take(MAX_SETTINGS_BYTES + 1)
+        .read_to_end(&mut encoded)
+    {
+        Ok(_) if encoded.len() as u64 > MAX_SETTINGS_BYTES => Some(format!(
+            "ConfigChange input exceeds {MAX_SETTINGS_BYTES} bytes"
+        )),
         Ok(_) => evaluate_config_change(&encoded),
         Err(error) => Some(format!("cannot read ConfigChange input: {error}")),
     };
@@ -99,8 +108,8 @@ fn evaluate_config_change(encoded: &[u8]) -> Option<String> {
 }
 
 fn validate_file(path: &Path) -> Result<(), BridgeError> {
-    let contents = match fs::read(path) {
-        Ok(contents) => contents,
+    let file = match File::open(path) {
+        Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(error) => {
             return Err(BridgeError::configuration(format!(
@@ -109,6 +118,33 @@ fn validate_file(path: &Path) -> Result<(), BridgeError> {
             )));
         }
     };
+    let metadata = file.metadata().map_err(|error| {
+        BridgeError::configuration(format!(
+            "cannot inspect Claude settings {}: {error}",
+            path.display()
+        ))
+    })?;
+    if metadata.len() > MAX_SETTINGS_BYTES {
+        return Err(BridgeError::configuration(format!(
+            "Claude settings exceed {MAX_SETTINGS_BYTES} bytes: {}",
+            path.display()
+        )));
+    }
+    let mut contents = Vec::new();
+    file.take(MAX_SETTINGS_BYTES + 1)
+        .read_to_end(&mut contents)
+        .map_err(|error| {
+            BridgeError::configuration(format!(
+                "cannot read Claude settings {}: {error}",
+                path.display()
+            ))
+        })?;
+    if contents.len() as u64 > MAX_SETTINGS_BYTES {
+        return Err(BridgeError::configuration(format!(
+            "Claude settings exceed {MAX_SETTINGS_BYTES} bytes: {}",
+            path.display()
+        )));
+    }
     let settings: ClaudeSettings = serde_json::from_slice(&contents).map_err(|error| {
         BridgeError::configuration(format!(
             "cannot parse Claude settings {}: {error}",

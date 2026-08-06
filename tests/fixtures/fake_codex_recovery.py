@@ -16,8 +16,11 @@ try:
         launch_number = int(state_file.read()) + 1
 except FileNotFoundError:
     launch_number = 1
-with open(state_path, "w", encoding="utf-8") as state_file:
-    state_file.write(str(launch_number))
+if launch_number == 1:
+    with open(state_path, "w", encoding="utf-8") as state_file:
+        state_file.write(str(launch_number))
+else:
+    os.remove(state_path)
 
 
 def send(message):

@@ -1,6 +1,6 @@
 use std::fmt;
 
-use serde_json::Value;
+use serde_json::{Value, value::RawValue};
 
 use crate::domain::{JsonDocument, JsonObject};
 
@@ -34,7 +34,7 @@ impl From<serde_json::Error> for JsonContractError {
 /// Returns an error when the source is not valid JSON.
 pub fn document(source: impl Into<String>) -> Result<JsonDocument, JsonContractError> {
     let source = source.into();
-    serde_json::from_str::<Value>(&source)?;
+    let _validated = serde_json::from_str::<Box<RawValue>>(&source)?;
     Ok(JsonDocument::from_validated(source))
 }
 
@@ -81,6 +81,15 @@ mod tests {
     #[test]
     fn document_rejects_invalid_json() {
         assert!(document("{not-json}").is_err());
+    }
+
+    #[test]
+    fn document_preserves_numbers_outside_serde_value_range()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let source = r#"{"finite_for_provider":1e400,"precise":123456789012345678901234567890}"#;
+        let value = document(source)?;
+        assert_eq!(value.as_str(), source);
+        Ok(())
     }
 
     #[test]

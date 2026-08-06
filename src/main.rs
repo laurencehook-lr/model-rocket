@@ -72,8 +72,13 @@ async fn main() -> Result<(), BridgeError> {
                     "validate-claude accepts exactly one executable path",
                 ));
             }
-            model_rocket::contracts::claude_executable::validate(std::path::Path::new(&path))?;
-            Ok(())
+            let canonical =
+                model_rocket::contracts::claude_executable::validate(std::path::Path::new(&path))?;
+            writeln!(io::stdout().lock(), "{}", canonical.display()).map_err(|error| {
+                BridgeError::unavailable(format!(
+                    "cannot write validated Claude Code executable path: {error}"
+                ))
+            })
         }
         Some(command) if command == OsStr::new("guard-settings-change") => {
             reject_trailing_arguments(&mut arguments, "guard-settings-change")?;

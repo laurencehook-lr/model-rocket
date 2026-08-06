@@ -13,7 +13,6 @@ pub const CODEX_BASE_INSTRUCTIONS: &str =
     "Act only as the model inside Claude Code and use only host-supplied dynamic tools.";
 pub const CODEX_DEVELOPER_GUARD: &str = "Act as the model inside Claude Code. Respond with assistant text or the supplied dynamic tools only. Never invoke Codex built-in shell, file, web, MCP, collaboration, or user-input tools.";
 pub const TRUSTED_CHILD_PATH: &str = "/usr/bin:/bin";
-pub const CLAUDE_DISCONNECTED_ERROR: &str = "Claude Code disconnected during generation";
 pub const BRIDGE_STARTUP_ATTEMPTS: u16 = 300;
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]

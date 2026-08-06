@@ -116,7 +116,13 @@ canonical_gpt_model=""
 gpt_context_tokens=""
 required_claude_version=""
 bridge_startup_attempts=""
-launcher_contract="$($bridge_bin launcher-contract)"
+launcher_contract="$(
+  env -i \
+    HOME="$HOME" \
+    PATH="/usr/bin:/bin" \
+    MODEL_ROCKET_CONFIG="$MODEL_ROCKET_CONFIG" \
+    "$bridge_bin" launcher-contract
+)"
 while IFS='=' read -r contract_key contract_value; do
   case "$contract_key" in
   default_claude_model) default_claude_model="$contract_value" ;;
@@ -145,7 +151,7 @@ if [[ ! "$bridge_startup_attempts" =~ ^[1-9][0-9]*$ ]]; then
   echo "Bridge returned an invalid startup-attempt contract." >&2
   exit 1
 fi
-MODEL_ROCKET_DEFAULT_MODEL="$default_claude_model"
+MODEL_ROCKET_DEFAULT_MODEL="${MODEL_ROCKET_DEFAULT_MODEL:-$default_claude_model}"
 
 claude_config_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 project_root="$user_cwd"
@@ -180,10 +186,15 @@ if [[ ! -x "$MODEL_ROCKET_CLAUDE_BIN" ]]; then
   exit 1
 fi
 
-env -i \
+validated_claude_bin="$(env -i \
   HOME="$HOME" \
   PATH="/usr/bin:/bin" \
-  "$bridge_bin" validate-claude "$MODEL_ROCKET_CLAUDE_BIN"
+  "$bridge_bin" validate-claude "$MODEL_ROCKET_CLAUDE_BIN")"
+if [[ "$validated_claude_bin" != /* || ! -x "$validated_claude_bin" ]]; then
+  echo "Bridge returned an invalid validated Claude Code executable path: $validated_claude_bin" >&2
+  exit 1
+fi
+MODEL_ROCKET_CLAUDE_BIN="$validated_claude_bin"
 
 if [[ "$MODEL_ROCKET_CODEX_BIN" != /* ]]; then
   echo "Codex binary path must be absolute: $MODEL_ROCKET_CODEX_BIN" >&2
@@ -196,6 +207,7 @@ if [[ ! -x "$MODEL_ROCKET_CODEX_BIN" ]]; then
 fi
 
 claude_unset_environment=(
+  -u MODEL_ROCKET_DEFAULT_MODEL
   -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY
   -u http_proxy -u https_proxy -u all_proxy
   -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_CUSTOM_HEADERS
@@ -300,7 +312,7 @@ else
   listen_host="${listen_addr%:*}"
   listen_proxy_host="$listen_host"
 fi
-if ! curl --noproxy "$listen_host" --fail --silent --output /dev/null "http://${listen_addr}/healthz"; then
+if ! curl --noproxy "$listen_host" --connect-timeout 1 --max-time 2 --fail --silent --output /dev/null "http://${listen_addr}/healthz"; then
   cat "$log_file" >&2
   echo "Bridge did not become healthy at http://${listen_addr}." >&2
   exit 1
@@ -329,10 +341,14 @@ env -i \
     "http://${listen_addr}/${bearer}" \
     "$proxy_bypass" >"$routing_settings_file"
 
-env -i \
+revalidated_claude_bin="$(env -i \
   HOME="$HOME" \
   PATH="/usr/bin:/bin" \
-  "$bridge_bin" validate-claude "$MODEL_ROCKET_CLAUDE_BIN"
+  "$bridge_bin" validate-claude "$MODEL_ROCKET_CLAUDE_BIN")"
+if [[ "$revalidated_claude_bin" != "$MODEL_ROCKET_CLAUDE_BIN" ]]; then
+  echo "Claude Code executable path changed after validation." >&2
+  exit 1
+fi
 
 env "${claude_unset_environment[@]}" \
   ANTHROPIC_BASE_URL="http://${listen_addr}/${bearer}" \

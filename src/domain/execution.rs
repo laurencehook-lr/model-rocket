@@ -102,7 +102,7 @@ impl PresentedCredential {
     }
 
     #[must_use]
-    pub fn expose(&self) -> &str {
+    pub(crate) fn expose(&self) -> &str {
         &self.0
     }
 }

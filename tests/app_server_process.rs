@@ -169,46 +169,48 @@ async fn app_server_child_has_no_api_key_environment() -> Result<(), Box<dyn std
 fn restricted_model_catalog_exposes_no_codex_tools() -> Result<(), Box<dyn std::error::Error>> {
     let config = fixture_config("fake_codex.py")?;
     let catalog = restricted_model_catalog(config.catalogue())?;
-    let model = catalog
+    let models = catalog
         .get("models")
         .and_then(serde_json::Value::as_array)
-        .and_then(|models| models.first())
-        .ok_or_else(|| std::io::Error::other("restricted model missing"))?;
-    assert_eq!(
-        model.get("shell_type").and_then(serde_json::Value::as_str),
-        Some("disabled")
-    );
-    assert!(
-        model
-            .get("apply_patch_tool_type")
-            .is_some_and(serde_json::Value::is_null)
-    );
-    assert_eq!(
-        model
-            .get("supports_search_tool")
-            .and_then(serde_json::Value::as_bool),
-        Some(false)
-    );
-    assert!(
-        model
-            .get("multi_agent_version")
-            .is_some_and(serde_json::Value::is_null)
-    );
-    assert_eq!(
-        model.get("tool_mode").and_then(serde_json::Value::as_str),
-        Some("direct")
-    );
-    assert_eq!(
-        model
-            .pointer("/service_tiers/0/id")
-            .and_then(serde_json::Value::as_str),
-        Some("priority")
-    );
-    assert!(
-        model
-            .get("default_service_tier")
-            .is_some_and(serde_json::Value::is_null)
-    );
+        .ok_or_else(|| std::io::Error::other("restricted models missing"))?;
+    assert!(!models.is_empty(), "restricted models must not be empty");
+    for model in models {
+        assert_eq!(
+            model.get("shell_type").and_then(serde_json::Value::as_str),
+            Some("disabled")
+        );
+        assert!(
+            model
+                .get("apply_patch_tool_type")
+                .is_some_and(serde_json::Value::is_null)
+        );
+        assert_eq!(
+            model
+                .get("supports_search_tool")
+                .and_then(serde_json::Value::as_bool),
+            Some(false)
+        );
+        assert!(
+            model
+                .get("multi_agent_version")
+                .is_some_and(serde_json::Value::is_null)
+        );
+        assert_eq!(
+            model.get("tool_mode").and_then(serde_json::Value::as_str),
+            Some("direct")
+        );
+        assert_eq!(
+            model
+                .pointer("/service_tiers/0/id")
+                .and_then(serde_json::Value::as_str),
+            Some("priority")
+        );
+        assert!(
+            model
+                .get("default_service_tier")
+                .is_some_and(serde_json::Value::is_null)
+        );
+    }
     Ok(())
 }
 

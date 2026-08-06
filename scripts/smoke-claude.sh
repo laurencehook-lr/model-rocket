@@ -13,5 +13,11 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 bridge_bin="${MODEL_ROCKET_BRIDGE_BIN:-$HOME/.local/bin/model-rocket-bridge}"
 model="$($bridge_bin canonical-route)"
 
-MODEL_ROCKET_CWD="$isolated_cwd" \
-  "$script_dir/model-rocket" --model "$model" --print "Reply with exactly: model-rocket text smoke passed"
+response="$({
+  MODEL_ROCKET_CWD="$isolated_cwd" \
+    "$script_dir/model-rocket" --model "$model" --print "Reply with exactly: model-rocket text smoke passed"
+})"
+if [[ "$response" != *"model-rocket text smoke passed"* ]]; then
+  echo "Claude smoke response did not contain the expected marker." >&2
+  exit 1
+fi

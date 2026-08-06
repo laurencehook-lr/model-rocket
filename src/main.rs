@@ -52,8 +52,14 @@ async fn main() -> Result<(), BridgeError> {
 
     let mut arguments = std::env::args_os().skip(1);
     match arguments.next() {
-        Some(command) if command == OsStr::new("preflight") => preflight().await,
-        Some(command) if command == OsStr::new("serve") => serve().await,
+        Some(command) if command == OsStr::new("preflight") => {
+            reject_trailing_arguments(&mut arguments, "preflight")?;
+            preflight().await
+        }
+        Some(command) if command == OsStr::new("serve") => {
+            reject_trailing_arguments(&mut arguments, "serve")?;
+            serve().await
+        }
         Some(command) if command == OsStr::new("validate-settings") => {
             claude_settings::validate(arguments)
         }
@@ -70,21 +76,25 @@ async fn main() -> Result<(), BridgeError> {
             Ok(())
         }
         Some(command) if command == OsStr::new("guard-settings-change") => {
+            reject_trailing_arguments(&mut arguments, "guard-settings-change")?;
             claude_settings::guard_config_change(io::stdin().lock(), io::stdout().lock())
         }
         Some(command) if command == OsStr::new("launcher-contract") => {
+            reject_trailing_arguments(&mut arguments, "launcher-contract")?;
             let catalogue = model_catalogue_from_env()?;
             product::write_launcher_contract(&catalogue, io::stdout().lock()).map_err(|error| {
                 BridgeError::unavailable(format!("cannot write launcher contract: {error}"))
             })
         }
         Some(command) if command == OsStr::new("worker-config") => {
+            reject_trailing_arguments(&mut arguments, "worker-config")?;
             let catalogue = model_catalogue_from_env()?;
             product::write_worker_config(&catalogue, io::stdout().lock()).map_err(|error| {
                 BridgeError::unavailable(format!("cannot write worker configuration: {error}"))
             })
         }
         Some(command) if command == OsStr::new("canonical-route") => {
+            reject_trailing_arguments(&mut arguments, "canonical-route")?;
             let catalogue = model_catalogue_from_env()?;
             writeln!(
                 io::stdout().lock(),
@@ -159,7 +169,37 @@ async fn serve() -> Result<(), BridgeError> {
 }
 
 async fn shutdown_signal() {
-    let _result = tokio::signal::ctrl_c().await;
+    #[cfg(unix)]
+    {
+        let terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate());
+        match terminate {
+            Ok(mut terminate) => {
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {}
+                    _ = terminate.recv() => {}
+                }
+            }
+            Err(_) => {
+                let _result = tokio::signal::ctrl_c().await;
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _result = tokio::signal::ctrl_c().await;
+    }
+}
+
+fn reject_trailing_arguments(
+    arguments: &mut impl Iterator<Item = std::ffi::OsString>,
+    command: &str,
+) -> Result<(), BridgeError> {
+    if arguments.next().is_some() {
+        return Err(BridgeError::configuration(format!(
+            "{command} does not accept arguments"
+        )));
+    }
+    Ok(())
 }
 
 fn required_argument(

@@ -101,6 +101,19 @@ fn unsupported_fields_fail_explicitly() -> Result<(), Box<dyn std::error::Error>
         .err()
         .ok_or_else(|| std::io::Error::other("thinking must not be silently discarded"))?;
     assert!(error.to_string().contains("adaptive thinking"));
+
+    let request = serde_json::from_value::<MessagesRequest>(serde_json::json!({
+        "model": "gpt-5.6-sol",
+        "max_tokens": 100,
+        "stream": true,
+        "messages": [{"role": "user", "content": "hello"}],
+        "unknown_top_level_field": true
+    }))?;
+    let error = request
+        .validate("gpt-5.6-sol")
+        .err()
+        .ok_or_else(|| std::io::Error::other("unknown field must not be silently discarded"))?;
+    assert!(error.to_string().contains("unsupported request fields"));
     Ok(())
 }
 

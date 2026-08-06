@@ -30,7 +30,12 @@ if [[ ! -L "$CODEX_HOME/auth.json" ]]; then
   echo "Codex child did not receive the managed-auth symlink" >&2
   exit 44
 fi
-if ! grep -q '^enabled = false$' "$CODEX_HOME/config.toml"; then
+if ! awk '
+  $0 == "[agents]" { in_agents = 1; next }
+  in_agents && /^\[/ { exit found ? 0 : 1 }
+  in_agents && $0 == "enabled = false" { found = 1 }
+  END { exit found ? 0 : 1 }
+' "$CODEX_HOME/config.toml"; then
   echo "isolated Codex config did not disable agents" >&2
   exit 45
 fi

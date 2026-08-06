@@ -8,6 +8,7 @@ use axum::{
     routing::post,
 };
 use model_rocket::{
+    adapters::outbound::codex::AppServer,
     config::PreflightConfig,
     contracts::json as json_contract,
     domain::ModelRoute,
@@ -64,14 +65,14 @@ async fn capture_request(
         });
     }
     (
-        StatusCode::INTERNAL_SERVER_ERROR,
+        StatusCode::BAD_REQUEST,
         Json(json!({"error": {"message": "capture complete"}})),
     )
 }
 
-async fn capture_outbound_request(
-    route: ModelRoute,
-) -> Result<CapturedRequest, Box<dyn std::error::Error>> {
+async fn capture_outbound_requests(
+    routes: &[ModelRoute],
+) -> Result<Vec<CapturedRequest>, Box<dyn std::error::Error>> {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let address = listener.local_addr()?;
     let endpoint = format!("http://{address}/").parse::<reqwest::Url>()?;
@@ -101,58 +102,79 @@ async fn capture_outbound_request(
         std::io::Error::new(
             std::io::ErrorKind::TimedOut,
             format!(
-                "Codex App Server launch timed out for route {}",
-                route.claude_model.as_str()
+                "Codex App Server launch timed out before capturing {} routes",
+                routes.len()
             ),
         )
     })??;
+    let cwd = std::env::current_dir()?;
+    let mut captured_requests = Vec::with_capacity(routes.len());
+
+    for route in routes {
+        captured_requests
+            .push(capture_route(&mut app_server, &capture, route, &cwd.to_string_lossy()).await?);
+    }
+
+    capture_server.abort();
+    let _aborted = capture_server.await;
+    Ok(captured_requests)
+}
+
+async fn capture_route(
+    app_server: &mut AppServer,
+    capture: &Capture,
+    route: &ModelRoute,
+    cwd: &str,
+) -> Result<CapturedRequest, Box<dyn std::error::Error>> {
     let (capture_tx, capture_rx) = oneshot::channel();
     *capture.lock().await = Some(capture_tx);
-    let cwd = std::env::current_dir()?;
-    let mut task = tokio::spawn(async move {
-        let tools = ToolSet::new(vec![ToolDefinition::new(
-            ClaudeToolName::from("weather"),
-            ToolDescription::new("Get weather"),
-            json_contract::object(&json!({"type": "object"})).map_err(|error| {
-                BridgeError::protocol(format!("test tool schema is invalid: {error}"))
+    let tools = ToolSet::new(vec![ToolDefinition::new(
+        ClaudeToolName::from("weather"),
+        ToolDescription::new("Get weather"),
+        json_contract::object(&json!({"type": "object"}))
+            .map_err(|error| BridgeError::protocol(format!("invalid test schema: {error}")))?,
+    )]);
+    let (delta_tx, _delta_rx) = mpsc::channel(8);
+    let output = CaptureOutput(delta_tx);
+    let mut turn = Box::pin(app_server.start_turn(
+        StartModelTurn::new(
+            route.codex_model.clone(),
+            WorkingDirectory::new(cwd.to_owned()),
+            tools,
+            ModelPrompt::new("Use the weather tool."),
+            DeveloperInstructions::new("Wire-capture contract test."),
+            OutputTokenLimit::new(100).map_err(|error| {
+                BridgeError::invalid_request(format!("invalid test output limit: {error}"))
             })?,
-        )]);
-        let (delta_tx, _delta_rx) = mpsc::channel(8);
-        let output = CaptureOutput(delta_tx);
-        app_server
-            .start_turn(
-                StartModelTurn::new(
-                    route.codex_model.clone(),
-                    WorkingDirectory::new(cwd.to_string_lossy().into_owned()),
-                    tools,
-                    ModelPrompt::new("Use the weather tool."),
-                    DeveloperInstructions::new("Wire-capture contract test."),
-                    OutputTokenLimit::new(100).map_err(|error| {
-                        BridgeError::invalid_request(format!(
-                            "test output limit is invalid: {error}"
-                        ))
-                    })?,
-                    route.reasoning_effort,
-                    route.service_tier,
-                    None,
-                ),
-                &output,
-            )
-            .await
-    });
-
+            route.reasoning_effort,
+            route.service_tier,
+            None,
+        ),
+        &output,
+    ));
     let captured = tokio::select! {
         captured = timeout(Duration::from_secs(20), capture_rx) => captured??,
-        outcome = &mut task => {
+        outcome = &mut turn => {
             return Err(std::io::Error::other(format!(
-                "production adapter turn ended before request capture: {outcome:?}"
+                "turn ended before capture for {}: {outcome:?}", route.claude_model.as_str()
             )).into());
         }
     };
-    task.abort();
-    let _aborted = task.await;
-    capture_server.abort();
-    let _aborted = capture_server.await;
+    let outcome = timeout(Duration::from_secs(20), &mut turn)
+        .await
+        .map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                format!("turn cleanup timed out for {}", route.claude_model.as_str()),
+            )
+        })?;
+    if outcome.is_ok() {
+        return Err(std::io::Error::other(format!(
+            "capture failure completed turn for {}",
+            route.claude_model.as_str()
+        ))
+        .into());
+    }
     Ok(captured)
 }
 
@@ -181,7 +203,10 @@ async fn real_codex_production_adapter_exposes_only_the_supplied_dynamic_tool()
         .iter()
         .find(|route| model_rocket::contracts::codex::service_tier(route.service_tier).is_none())
         .ok_or_else(|| std::io::Error::other("standard route missing"))?;
-    let captured = capture_outbound_request(route.clone()).await?;
+    let captured = capture_outbound_requests(std::slice::from_ref(route))
+        .await?
+        .pop()
+        .ok_or_else(|| std::io::Error::other("production request was not captured"))?;
     assert!(
         captured.uri.path().contains("responses"),
         "unexpected production request URI: {}",
@@ -212,8 +237,9 @@ async fn real_codex_production_adapter_exposes_only_the_supplied_dynamic_tool()
 async fn real_codex_production_adapter_preserves_every_route_policy_on_the_wire()
 -> Result<(), Box<dyn std::error::Error>> {
     let config = PreflightConfig::test_fixture_from_env()?;
-    for route in config.catalogue().routes() {
-        let captured = capture_outbound_request(route.clone()).await?;
+    let routes = config.catalogue().routes();
+    let captured_requests = capture_outbound_requests(routes).await?;
+    for (route, captured) in routes.iter().zip(captured_requests) {
         let body = request_json(&captured)?;
         assert_eq!(
             body.get("model").and_then(Value::as_str),

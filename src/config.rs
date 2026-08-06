@@ -27,12 +27,19 @@ impl Config {
     ///
     /// Returns an error for a missing bearer, invalid address, or non-loopback listener.
     pub fn from_env() -> Result<Self, BridgeError> {
-        let listen = env::var("MODEL_ROCKET_LISTEN")
-            .unwrap_or_else(|_| "127.0.0.1:0".to_owned())
-            .parse::<SocketAddr>()
-            .map_err(|error| {
-                BridgeError::configuration(format!("invalid MODEL_ROCKET_LISTEN: {error}"))
-            })?;
+        let listen = match env::var("MODEL_ROCKET_LISTEN") {
+            Ok(listen) => listen,
+            Err(env::VarError::NotPresent) => "127.0.0.1:0".to_owned(),
+            Err(env::VarError::NotUnicode(_)) => {
+                return Err(BridgeError::configuration(
+                    "MODEL_ROCKET_LISTEN must contain valid UTF-8",
+                ));
+            }
+        }
+        .parse::<SocketAddr>()
+        .map_err(|error| {
+            BridgeError::configuration(format!("invalid MODEL_ROCKET_LISTEN: {error}"))
+        })?;
 
         let bearer = env::var("MODEL_ROCKET_BEARER")
             .map_err(|_| BridgeError::configuration("MODEL_ROCKET_BEARER is required"))?;
@@ -58,9 +65,9 @@ impl Config {
                 "MODEL_ROCKET_LISTEN must use a loopback address",
             ));
         }
-        if self.bearer.len() < 32 {
+        if self.bearer.len() < 32 || !self.bearer.bytes().all(|byte| byte.is_ascii_graphic()) {
             return Err(BridgeError::configuration(
-                "MODEL_ROCKET_BEARER must contain at least 32 bytes",
+                "MODEL_ROCKET_BEARER must contain at least 32 bytes of printable ASCII",
             ));
         }
         if self.cwd.to_str().is_none() {

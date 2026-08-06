@@ -1,14 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ "${1:-}" == "--version" ]]; then
-  if [[ "${MODEL_ROCKET_TEST_REPLACE_ON_VERSION:-}" == "1" ]]; then
-    printf '%s\n' '# replaced after version validation' >>"$0"
-  fi
-  printf '%s\n' "2.1.223 (Claude Code)"
-  exit 0
-fi
-
 for forbidden_name in \
   ANTHROPIC_API_KEY \
   ANTHROPIC_AUTH_TOKEN \
@@ -56,6 +48,13 @@ for forbidden_proxy_name in \
     exit 87
   fi
 done
+if [[ "${1:-}" == "--version" ]]; then
+  if [[ "${MODEL_ROCKET_TEST_REPLACE_ON_VERSION:-}" == "1" ]]; then
+    printf '%s\n' '# replaced after version validation' >>"$0"
+  fi
+  printf '%s\n' "2.1.223 (Claude Code)"
+  exit 0
+fi
 if [[ ! "${ANTHROPIC_BASE_URL:-}" =~ ^http://127\.0\.0\.1:[0-9]+/[0-9a-f]{64}$ ]]; then
   echo "Claude did not receive a loopback router URL" >&2
   exit 76
@@ -82,7 +81,7 @@ for required_bypass in localhost 127.0.0.1 ::1 '[::1]' existing-upper.example ex
     exit 84
   fi
 done
-if [[ " $* " != *" --model claude-fable-5 "* ]]; then
+if [[ "${1:-}" != "--model" || "${2:-}" != "claude-fable-5" ]]; then
   echo "Claude did not start with Fable as the lead model" >&2
   exit 79
 fi

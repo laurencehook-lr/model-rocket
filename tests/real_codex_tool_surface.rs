@@ -1,26 +1,67 @@
-use std::{
-    path::{Path, PathBuf},
-    process::Stdio,
-    sync::Arc,
+use std::sync::Arc;
+
+use axum::{
+    Json, Router,
+    body::Bytes,
+    extract::State,
+    http::{HeaderMap, StatusCode, Uri, header},
+    routing::post,
+};
+use model_rocket::{
+    config::PreflightConfig,
+    contracts::json as json_contract,
+    domain::ModelRoute,
+    domain::{
+        AssistantTextDelta, BridgeError, ClaudeToolName, DeveloperInstructions, ModelPrompt,
+        OutputTokenLimit, StartModelTurn, ToolDefinition, ToolDescription, ToolSet,
+        WorkingDirectory,
+    },
+    ports::{ModelOutput, PortFuture},
+    test_support,
 };
 
-use axum::{Json, Router, extract::State, http::StatusCode, routing::post};
+struct CaptureOutput(mpsc::Sender<String>);
+
+impl ModelOutput for CaptureOutput {
+    fn emit(&self, delta: AssistantTextDelta) -> PortFuture<'_, ()> {
+        Box::pin(async move {
+            self.0
+                .send(delta.as_str().to_owned())
+                .await
+                .map_err(|_| BridgeError::unavailable("capture output receiver closed"))
+        })
+    }
+}
 use serde_json::{Value, json};
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    process::{Child, ChildStdin, ChildStdout, Command},
-    sync::{Mutex, oneshot},
+    sync::{Mutex, mpsc, oneshot},
     time::{Duration, timeout},
 };
 
-type Capture = Arc<Mutex<Option<oneshot::Sender<Value>>>>;
+#[derive(Debug)]
+struct CapturedRequest {
+    uri: Uri,
+    content_encoding: Option<String>,
+    body: Vec<u8>,
+}
+
+type Capture = Arc<Mutex<Option<oneshot::Sender<CapturedRequest>>>>;
 
 async fn capture_request(
     State(capture): State<Capture>,
-    Json(body): Json<Value>,
+    uri: Uri,
+    headers: HeaderMap,
+    body: Bytes,
 ) -> (StatusCode, Json<Value>) {
     if let Some(sender) = capture.lock().await.take() {
-        let _sent = sender.send(body);
+        let _sent = sender.send(CapturedRequest {
+            uri: uri.clone(),
+            content_encoding: headers
+                .get(header::CONTENT_ENCODING)
+                .and_then(|value| value.to_str().ok())
+                .map(ToOwned::to_owned),
+            body: body.to_vec(),
+        });
     }
     (
         StatusCode::INTERNAL_SERVER_ERROR,
@@ -28,214 +69,134 @@ async fn capture_request(
     )
 }
 
-async fn send(stdin: &mut ChildStdin, value: Value) -> Result<(), Box<dyn std::error::Error>> {
-    let mut encoded = serde_json::to_vec(&value)?;
-    encoded.push(b'\n');
-    stdin.write_all(&encoded).await?;
-    stdin.flush().await?;
-    Ok(())
-}
-
-async fn response(
-    stdout: &mut BufReader<ChildStdout>,
-    expected_id: u64,
-) -> Result<Value, Box<dyn std::error::Error>> {
-    timeout(Duration::from_secs(10), async {
-        loop {
-            let mut line = String::new();
-            if stdout.read_line(&mut line).await? == 0 {
-                return Err(std::io::Error::other("real App Server closed stdout").into());
-            }
-            let message: Value = serde_json::from_str(&line)?;
-            if message.get("id").and_then(Value::as_u64) == Some(expected_id) {
-                if let Some(error) = message.get("error") {
-                    return Err(std::io::Error::other(format!(
-                        "real App Server request failed: {error}"
-                    ))
-                    .into());
-                }
-                return Ok(message);
-            }
-        }
-    })
-    .await?
-}
-
-fn configure_codex_home(
-    address: std::net::SocketAddr,
-) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    let codex_home = std::env::temp_dir().join(format!(
-        "model-rocket-real-tool-surface-{}-{}",
-        std::process::id(),
-        uuid::Uuid::now_v7()
-    ));
-    std::fs::create_dir(&codex_home)?;
-    let mut catalog: Value = serde_json::from_slice(include_bytes!("../config/codex-models.json"))?;
-    let model = catalog
-        .get_mut("models")
-        .and_then(Value::as_array_mut)
-        .and_then(|models| models.first_mut())
-        .and_then(Value::as_object_mut)
-        .ok_or_else(|| std::io::Error::other("restricted model missing"))?;
-    model.insert("multi_agent_version".to_owned(), json!("v2"));
-    model.insert("use_responses_lite".to_owned(), json!(false));
-    let catalog_path = codex_home.join("models.json");
-    std::fs::write(&catalog_path, serde_json::to_vec(&catalog)?)?;
-    let config = format!(
-        r#"model = "gpt-5.6-sol"
-model_provider = "capture"
-model_catalog_json = {}
-web_search = "disabled"
-
-[orchestrator.skills]
-enabled = false
-
-[orchestrator.mcp]
-enabled = false
-
-[agents]
-enabled = false
-
-[tools.update_plan]
-enabled = false
-
-[tools.experimental_request_user_input]
-enabled = false
-
-[features]
-multi_agent = false
-multi_agent_v2 = false
-apps = false
-plugins = false
-hooks = false
-skill_search = false
-tool_suggest = false
-
-[model_providers.capture]
-name = "capture"
-base_url = "http://{address}/v1"
-wire_api = "responses"
-requires_openai_auth = false
-supports_websockets = false
-"#,
-        serde_json::to_string(Path::new(&catalog_path))?
-    );
-    std::fs::write(codex_home.join("config.toml"), config)?;
-    Ok(codex_home)
-}
-
-fn spawn_codex(
-    codex_home: &Path,
-) -> Result<(Child, ChildStdin, BufReader<ChildStdout>), Box<dyn std::error::Error>> {
-    let mut child = Command::new("codex")
-        .args([
-            "app-server",
-            "--strict-config",
-            "--disable",
-            "multi_agent_v2",
-            "--listen",
-            "stdio://",
-        ])
-        .env_clear()
-        .env("HOME", codex_home)
-        .env("CODEX_HOME", codex_home)
-        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .kill_on_drop(true)
-        .spawn()?;
-    let stdin = child
-        .stdin
-        .take()
-        .ok_or_else(|| std::io::Error::other("real App Server stdin missing"))?;
-    let stdout = BufReader::new(
-        child
-            .stdout
-            .take()
-            .ok_or_else(|| std::io::Error::other("real App Server stdout missing"))?,
-    );
-    Ok((child, stdin, stdout))
-}
-
-async fn begin_turn(
-    stdin: &mut ChildStdin,
-    stdout: &mut BufReader<ChildStdout>,
-    codex_home: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
-    send(
-        stdin,
-        json!({"method":"initialize","id":1,"params":{"clientInfo":{"name":"tool-surface-test","title":"tool-surface-test","version":"1"},"capabilities":{"experimentalApi":true}}}),
-    )
-    .await?;
-    let _initialized = response(stdout, 1).await?;
-    send(stdin, json!({"method":"initialized","params":{}})).await?;
-    send(
-        stdin,
-        json!({"method":"thread/start","id":2,"params":{
-            "model":"gpt-5.6-sol",
-            "modelProvider":"capture",
-            "cwd":codex_home,
-            "ephemeral":true,
-            "approvalPolicy":"never",
-            "sandbox":"read-only",
-            "environments":[],
-            "runtimeWorkspaceRoots":[],
-            "dynamicTools":[{"type":"function","name":"model_rocket_tool_0","description":"Claude Code tool name: weather\n\nGet weather","inputSchema":{"type":"object"}}]
-        }}),
-    )
-    .await?;
-    let thread = response(stdout, 2).await?;
-    let thread_id = thread
-        .pointer("/result/thread/id")
-        .and_then(Value::as_str)
-        .ok_or_else(|| std::io::Error::other("real App Server thread id missing"))?;
-    send(
-        stdin,
-        json!({"method":"turn/start","id":3,"params":{
-            "threadId":thread_id,
-            "model":"gpt-5.6-sol",
-            "input":[{"type":"text","text":"Use the weather tool."}]
-        }}),
-    )
-    .await?;
-    let _turn = response(stdout, 3).await?;
-    Ok(())
-}
-
-#[tokio::test]
-async fn real_codex_exposes_only_the_supplied_dynamic_tool()
--> Result<(), Box<dyn std::error::Error>> {
-    let version = Command::new("codex").arg("--version").output().await?;
-    assert!(version.status.success());
-    assert_eq!(
-        String::from_utf8(version.stdout)?.trim(),
-        "codex-cli 0.146.0"
-    );
-
+async fn capture_outbound_request(
+    route: ModelRoute,
+) -> Result<CapturedRequest, Box<dyn std::error::Error>> {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let address = listener.local_addr()?;
-    let (capture_tx, capture_rx) = oneshot::channel();
-    let capture = Arc::new(Mutex::new(Some(capture_tx)));
-    let server = tokio::spawn(async move {
+    let endpoint = format!("http://{address}/").parse::<reqwest::Url>()?;
+    let capture = Arc::new(Mutex::new(None));
+    let capture_for_server = Arc::clone(&capture);
+    let capture_server = tokio::spawn(async move {
         axum::serve(
             listener,
             Router::new()
                 .fallback(post(capture_request))
-                .with_state(capture),
+                .with_state(capture_for_server),
         )
         .await
     });
 
-    let codex_home = configure_codex_home(address)?;
-    let (mut child, mut stdin, mut stdout) = spawn_codex(&codex_home)?;
-    begin_turn(&mut stdin, &mut stdout, &codex_home).await?;
+    let config = PreflightConfig::test_fixture_from_env()?;
+    let mut app_server = timeout(
+        Duration::from_secs(600),
+        test_support::launch_for_wire_capture(
+            config.codex_executable(),
+            &endpoint,
+            Arc::clone(config.catalogue()),
+        ),
+    )
+    .await
+    .map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            format!(
+                "Codex App Server launch timed out for route {}",
+                route.claude_model.as_str()
+            ),
+        )
+    })??;
+    let (capture_tx, capture_rx) = oneshot::channel();
+    *capture.lock().await = Some(capture_tx);
+    let cwd = std::env::current_dir()?;
+    let mut task = tokio::spawn(async move {
+        let tools = ToolSet::new(vec![ToolDefinition::new(
+            ClaudeToolName::from("weather"),
+            ToolDescription::new("Get weather"),
+            json_contract::object(&json!({"type": "object"})).map_err(|error| {
+                BridgeError::protocol(format!("test tool schema is invalid: {error}"))
+            })?,
+        )]);
+        let (delta_tx, _delta_rx) = mpsc::channel(8);
+        let output = CaptureOutput(delta_tx);
+        app_server
+            .start_turn(
+                StartModelTurn::new(
+                    route.codex_model.clone(),
+                    WorkingDirectory::new(cwd.to_string_lossy().into_owned()),
+                    tools,
+                    ModelPrompt::new("Use the weather tool."),
+                    DeveloperInstructions::new("Wire-capture contract test."),
+                    OutputTokenLimit::new(100).map_err(|error| {
+                        BridgeError::invalid_request(format!(
+                            "test output limit is invalid: {error}"
+                        ))
+                    })?,
+                    route.reasoning_effort,
+                    route.service_tier,
+                    None,
+                ),
+                &output,
+            )
+            .await
+    });
 
-    let outbound = timeout(Duration::from_secs(10), capture_rx).await??;
-    let tools = outbound
-        .get("tools")
+    let captured = tokio::select! {
+        captured = timeout(Duration::from_secs(20), capture_rx) => captured??,
+        outcome = &mut task => {
+            return Err(std::io::Error::other(format!(
+                "production adapter turn ended before request capture: {outcome:?}"
+            )).into());
+        }
+    };
+    task.abort();
+    let _aborted = task.await;
+    capture_server.abort();
+    let _aborted = capture_server.await;
+    Ok(captured)
+}
+
+fn request_json(captured: &CapturedRequest) -> Result<Value, Box<dyn std::error::Error>> {
+    let body = match captured.content_encoding.as_deref() {
+        None => captured.body.clone(),
+        Some("zstd") => zstd::stream::decode_all(captured.body.as_slice())?,
+        Some(encoding) => {
+            return Err(std::io::Error::other(format!(
+                "production request uses unsupported test decoding {encoding}; {} raw bytes",
+                captured.body.len()
+            ))
+            .into());
+        }
+    };
+    Ok(serde_json::from_slice(&body)?)
+}
+
+#[tokio::test]
+async fn real_codex_production_adapter_exposes_only_the_supplied_dynamic_tool()
+-> Result<(), Box<dyn std::error::Error>> {
+    let config = PreflightConfig::test_fixture_from_env()?;
+    let route = config
+        .catalogue()
+        .routes()
+        .iter()
+        .find(|route| model_rocket::contracts::codex::service_tier(route.service_tier).is_none())
+        .ok_or_else(|| std::io::Error::other("standard route missing"))?;
+    let captured = capture_outbound_request(route.clone()).await?;
+    assert!(
+        captured.uri.path().contains("responses"),
+        "unexpected production request URI: {}",
+        captured.uri
+    );
+    let body = request_json(&captured)?;
+    let tools = body
+        .pointer("/input/0/tools")
         .and_then(Value::as_array)
-        .ok_or_else(|| std::io::Error::other("Responses request has no tools"))?;
+        .ok_or_else(|| {
+            std::io::Error::other(format!(
+                "subscription Responses request at {} has no developer tools",
+                captured.uri
+            ))
+        })?;
     assert_eq!(tools.len(), 1, "unexpected model-visible tools: {tools:?}");
     assert_eq!(
         tools
@@ -244,10 +205,36 @@ async fn real_codex_exposes_only_the_supplied_dynamic_tool()
             .and_then(Value::as_str),
         Some("model_rocket_tool_0")
     );
+    Ok(())
+}
 
-    child.kill().await?;
-    let _status = child.wait().await?;
-    server.abort();
-    std::fs::remove_dir_all(&codex_home)?;
+#[tokio::test]
+async fn real_codex_production_adapter_preserves_every_route_policy_on_the_wire()
+-> Result<(), Box<dyn std::error::Error>> {
+    let config = PreflightConfig::test_fixture_from_env()?;
+    for route in config.catalogue().routes() {
+        let captured = capture_outbound_request(route.clone()).await?;
+        let body = request_json(&captured)?;
+        assert_eq!(
+            body.get("model").and_then(Value::as_str),
+            Some(route.codex_model.as_str()),
+            "wrong outbound model for {}",
+            route.claude_model.as_str()
+        );
+        assert_eq!(
+            body.get("service_tier").and_then(Value::as_str),
+            model_rocket::contracts::codex::service_tier(route.service_tier),
+            "wrong outbound service tier for {}",
+            route.claude_model.as_str()
+        );
+        assert_eq!(
+            body.pointer("/reasoning/effort").and_then(Value::as_str),
+            Some(model_rocket::contracts::codex::reasoning_effort(
+                route.reasoning_effort,
+            )),
+            "wrong outbound effort for {}",
+            route.claude_model.as_str()
+        );
+    }
     Ok(())
 }

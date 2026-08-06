@@ -2,7 +2,10 @@ use std::collections::{HashMap, HashSet};
 
 use serde_json::Value;
 
-use crate::{anthropic::Tool, error::BridgeError};
+use crate::{
+    contracts::json as json_contract,
+    domain::{BridgeError, ToolSet},
+};
 
 const CODEX_TOOL_ALIAS_PREFIX: &str = "model_rocket_tool_";
 const CLAUDE_TOOL_DESCRIPTION_PREFIX: &str = "Claude Code tool name: ";
@@ -22,35 +25,38 @@ pub(crate) struct DynamicToolNames {
 }
 
 impl DynamicToolNames {
-    pub(crate) fn from_claude_tools(tools: &[Tool]) -> Result<Self, BridgeError> {
+    pub(crate) fn from_claude_tools(tools: &ToolSet) -> Result<Self, BridgeError> {
+        let tools = tools.as_slice();
         let mut seen_claude_names = HashSet::with_capacity(tools.len());
         let mut codex_tools = Vec::with_capacity(tools.len());
         let mut claude_name_by_codex_name = HashMap::with_capacity(tools.len());
 
         for (index, tool) in tools.iter().enumerate() {
-            if !valid_claude_tool_name(&tool.name) {
+            let claude_name = tool.name().as_str();
+            if !valid_claude_tool_name(claude_name) {
                 return Err(BridgeError::invalid_request(format!(
-                    "invalid Claude tool name {}",
-                    tool.name
+                    "invalid Claude tool name {claude_name}"
                 )));
             }
-            if !seen_claude_names.insert(tool.name.as_str()) {
+            if !seen_claude_names.insert(claude_name) {
                 return Err(BridgeError::invalid_request(format!(
-                    "duplicate Claude tool name {}",
-                    tool.name
+                    "duplicate Claude tool name {claude_name}"
                 )));
             }
 
             let codex_name = format!("{CODEX_TOOL_ALIAS_PREFIX}{index}");
             let description = format!(
                 "{CLAUDE_TOOL_DESCRIPTION_PREFIX}{}\n\n{}",
-                tool.name, tool.description
+                claude_name,
+                tool.description().as_str()
             );
-            claude_name_by_codex_name.insert(codex_name.clone(), tool.name.clone());
+            claude_name_by_codex_name.insert(codex_name.clone(), claude_name.to_owned());
             codex_tools.push(CodexDynamicTool {
                 name: codex_name,
                 description,
-                input_schema: tool.input_schema.clone(),
+                input_schema: json_contract::object_value(tool.input_schema()).map_err(
+                    |error| BridgeError::protocol(format!("tool input schema is invalid: {error}")),
+                )?,
             });
         }
 
@@ -87,16 +93,26 @@ mod tests {
     use serde_json::json;
 
     use super::DynamicToolNames;
-    use crate::anthropic::Tool;
+    use crate::{
+        contracts::json as json_contract,
+        domain::{ClaudeToolName, ToolDefinition, ToolDescription, ToolSet},
+    };
+
+    fn tool(name: &str, description: &str) -> Result<ToolDefinition, Box<dyn std::error::Error>> {
+        Ok(ToolDefinition::new(
+            ClaudeToolName::from(name),
+            ToolDescription::new(description),
+            json_contract::object(&json!({"type": "object"}))?,
+        ))
+    }
 
     #[test]
     fn reserved_claude_name_is_aliased_and_restored() -> Result<(), Box<dyn std::error::Error>> {
         let original = "mcp__plugin_context7_context7__query-docs";
-        let names = DynamicToolNames::from_claude_tools(&[Tool {
-            name: original.to_owned(),
-            description: "Query documentation".to_owned(),
-            input_schema: json!({"type": "object"}),
-        }])?;
+        let names = DynamicToolNames::from_claude_tools(&ToolSet::new(vec![tool(
+            original,
+            "Query documentation",
+        )?]))?;
 
         let mapped = names.tools().first().ok_or("mapped tool was not created")?;
         assert_eq!(mapped.name, "model_rocket_tool_0");
@@ -108,13 +124,11 @@ mod tests {
 
     #[test]
     fn duplicate_claude_names_fail_explicitly() -> Result<(), Box<dyn std::error::Error>> {
-        let tool = Tool {
-            name: "Read".to_owned(),
-            description: String::new(),
-            input_schema: json!({"type": "object"}),
-        };
+        let tool = tool("Read", "")?;
 
-        let Err(error) = DynamicToolNames::from_claude_tools(&[tool.clone(), tool]) else {
+        let Err(error) =
+            DynamicToolNames::from_claude_tools(&ToolSet::new(vec![tool.clone(), tool]))
+        else {
             return Err("duplicate tool names were accepted".into());
         };
         assert_eq!(
@@ -127,12 +141,9 @@ mod tests {
     #[test]
     fn invalid_claude_names_fail_before_aliasing() -> Result<(), Box<dyn std::error::Error>> {
         for invalid_name in ["", "contains space", "contains.dot", &"x".repeat(65)] {
-            let tool = Tool {
-                name: invalid_name.to_owned(),
-                description: String::new(),
-                input_schema: json!({"type": "object"}),
-            };
-            let Err(error) = DynamicToolNames::from_claude_tools(&[tool]) else {
+            let Err(error) =
+                DynamicToolNames::from_claude_tools(&ToolSet::new(vec![tool(invalid_name, "")?]))
+            else {
                 return Err(
                     format!("invalid Claude tool name was accepted: {invalid_name}").into(),
                 );

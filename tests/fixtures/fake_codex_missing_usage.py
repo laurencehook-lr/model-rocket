@@ -28,7 +28,7 @@ for raw_line in sys.stdin:
         send({"id": request_id, "result": {"thread": {"id": "thread_missing"}}})
     elif method == "turn/start":
         send({"id": request_id, "result": {"turn": {"id": "turn_missing"}}})
-        send({"method": "item/agentMessage/delta", "params": {"delta": "no usage"}})
-        send({"method": "turn/completed", "params": {"turn": {"status": "completed"}}})
+        send({"method": "item/agentMessage/delta", "params": {"delta": "no usage", "itemId": "item_missing_usage", "threadId": "thread_missing", "turnId": "turn_missing"}})
+        send({"method": "turn/completed", "params": {"threadId": "thread_missing", "turn": {"id": "turn_missing", "status": "completed", "items": []}}})
     else:
         send({"id": request_id, "error": {"code": -32601, "message": "unknown method"}})

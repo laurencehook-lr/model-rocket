@@ -38,7 +38,7 @@ for raw_line in sys.stdin:
             send({"id": request_id, "error": {"code": -32602, "message": "outputSchema mismatch"}})
             continue
         send({"id": request_id, "result": {"turn": {"id": "turn_1", "status": "inProgress", "items": [], "error": None}}})
-        send({"method": "item/agentMessage/delta", "params": {"delta": '{"title":"bridge"}'}})
+        send({"method": "item/agentMessage/delta", "params": {"delta": '{"title":"bridge"}', "itemId": "item_schema", "threadId": "thread_1", "turnId": "turn_1"}})
         usage = {
             "inputTokens": 10,
             "cachedInputTokens": 0,
@@ -47,6 +47,6 @@ for raw_line in sys.stdin:
             "totalTokens": 14,
         }
         send({"method": "thread/tokenUsage/updated", "params": {"threadId": "thread_1", "turnId": "turn_1", "tokenUsage": {"last": usage, "total": usage, "modelContextWindow": 1000000}}})
-        send({"method": "turn/completed", "params": {"turn": {"status": "completed"}}})
+        send({"method": "turn/completed", "params": {"threadId": "thread_1", "turn": {"id": "turn_1", "status": "completed", "items": []}}})
     else:
         send({"id": request_id, "error": {"code": -32601, "message": "unknown method"}})

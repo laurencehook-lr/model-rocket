@@ -6,12 +6,12 @@ if [[ "${MODEL_ROCKET_ALLOW_LIVE_SMOKE:-}" != "1" ]]; then
   exit 2
 fi
 
-model="gpt-5.6-sol"
-
 isolated_cwd="$(mktemp -d -t model-rocket-smoke.XXXXXX)"
 trap 'rm -rf -- "$isolated_cwd"' EXIT
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+bridge_bin="${MODEL_ROCKET_BRIDGE_BIN:-$HOME/.local/bin/model-rocket-bridge}"
+model="$($bridge_bin canonical-route)"
 
-MODEL_ROCKET_CWD="$isolated_cwd" MODEL_ROCKET_DEFAULT_MODEL="$model" \
-  "$script_dir/model-rocket" --print "Reply with exactly: model-rocket text smoke passed"
+MODEL_ROCKET_CWD="$isolated_cwd" \
+  "$script_dir/model-rocket" --model "$model" --print "Reply with exactly: model-rocket text smoke passed"

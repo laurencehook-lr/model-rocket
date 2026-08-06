@@ -42,13 +42,19 @@ jobs:
         with:
           tool: cargo-nextest@0.9.132,just
       - name: Install pinned Codex CLI
-        run: npm install --global @openai/codex@0.146.0
+        run: |
+          npm install --global @openai/codex@0.146.0
+          codex_native="$(find "$(npm root -g)/@openai/codex/node_modules/@openai" -type f -path '*/vendor/*/bin/codex' -print -quit)"
+          test -n "$codex_native"
+          install -d -m 700 "$HOME/.local/bin"
+          install -m 755 "$codex_native" "$HOME/.local/bin/codex-native"
       - name: Create managed-auth test fixture
         run: |
           install -d -m 700 "$HOME/.codex"
           install -m 600 /dev/null "$HOME/.codex/auth.json"
       - run: just nextest
       - run: just security-test
+      - run: just wire-test
 
   policy:
     name: Policy

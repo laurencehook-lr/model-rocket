@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import json
 import sys
-import time
 
 if sys.argv[1:] == ["--version"]:
     print("codex-cli 0.146.0")
@@ -28,12 +27,7 @@ for raw_line in sys.stdin:
     elif method == "thread/start":
         send({"id": request_id, "result": {"thread": {"id": "thread_stream"}}})
     elif method == "turn/start":
+        send({"method": "item/agentMessage/delta", "params": {"delta": "éstreamed early", "itemId": "item_stream", "threadId": "thread_stream", "turnId": "turn_stream"}})
         send({"id": request_id, "result": {"turn": {"id": "turn_stream"}}})
-        send({"method": "item/agentMessage/delta", "params": {"delta": "éstreamed early"}})
-        time.sleep(1)
-        send({"method": "item/agentMessage/delta", "params": {"delta": " and completed"}})
-        usage = {"inputTokens": 9, "outputTokens": 4}
-        send({"method": "thread/tokenUsage/updated", "params": {"threadId": "thread_stream", "turnId": "turn_stream", "tokenUsage": {"last": usage}}})
-        send({"method": "turn/completed", "params": {"turn": {"status": "completed"}}})
     else:
         send({"id": request_id, "error": {"code": -32601, "message": "unknown method"}})

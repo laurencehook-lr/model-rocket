@@ -1,9 +1,14 @@
 //! Local Anthropic Messages compatibility bridge for Codex App Server.
 
-pub mod anthropic;
-pub mod app_server;
-pub mod bridge;
+pub mod adapters;
+pub mod application;
+pub mod bootstrap;
+pub mod claude_settings;
 pub mod config;
-pub mod error;
-pub mod http;
-mod tool_names;
+pub mod contracts;
+pub mod domain;
+pub mod policies;
+pub mod ports;
+pub mod product;
+#[cfg(feature = "test-support")]
+pub mod test_support;

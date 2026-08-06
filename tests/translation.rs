@@ -8,7 +8,7 @@ use model_rocket::{
 
 #[test]
 fn transcript_preserves_text_and_tool_order() -> Result<(), Box<dyn std::error::Error>> {
-    let messages = r#"[{"role":"user","content":"question"}, {"role":"assistant","content":[{"type":"future_valid_block","new_field":{"keep":true}}, {"type":"tool_use","id":"call_1","name":"weather","input":{"city":"London"},"future_tool_field":7}]}, {"role":"user","content":[{"type":"tool_result","tool_use_id":"call_1","content":"sunny","future_result_field":"keep"}]}]"#;
+    let messages = r#"[{"role":"user","content":"question"}, {"role":"system","content":"provider transition"}, {"role":"system","content":[{"type":"text","text":"weighted token budget"}]}, {"role":"assistant","content":[{"type":"future_valid_block","new_field":{"keep":true}}, {"type":"tool_use","id":"call_1","name":"weather","input":{"city":"London"},"future_tool_field":7}]}, {"role":"user","content":[{"type":"tool_result","tool_use_id":"call_1","content":"sunny","future_result_field":"keep"}]}]"#;
     let request_json = format!(
         r#"{{"model":"anthropic-model-rocket-gpt-5.6-sol-normal-high","max_tokens":100,"stream":true,"system":"system text","messages":{messages}}}"#
     );
@@ -44,7 +44,9 @@ fn malformed_or_known_unsupported_conversations_fail_explicitly()
         serde_json::json!([1]),
         serde_json::json!([{"role": "user"}]),
         serde_json::json!([{"content": "hello"}]),
-        serde_json::json!([{"role": "system", "content": "hello"}]),
+        serde_json::json!([{"role": "system", "content": [
+            {"type": "tool_use", "id": "call_1", "name": "weather", "input": {}}
+        ]}]),
         serde_json::json!([{"role": "user", "content": 7}]),
         serde_json::json!([{"role": "user", "content": [1]}]),
         serde_json::json!([{"role": "user", "content": [

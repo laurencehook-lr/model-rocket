@@ -350,7 +350,7 @@ fn validate_conversation(messages: &Value) -> Result<(), BridgeError> {
         let role = message.get("role").and_then(Value::as_str).ok_or_else(|| {
             BridgeError::invalid_request(format!("message {message_index} has no valid role"))
         })?;
-        if !matches!(role, "user" | "assistant") {
+        if !matches!(role, "user" | "assistant" | "system") {
             return Err(BridgeError::unsupported(format!(
                 "message {message_index} has unsupported role {role}"
             )));
@@ -391,6 +391,11 @@ fn validate_content_block(
             "message {message_index} content block {block_index} has no valid type"
         ))
     })?;
+    if role == "system" && block_type != "text" {
+        return Err(BridgeError::unsupported(format!(
+            "message {message_index} content block {block_index} type {block_type} is invalid for role system"
+        )));
+    }
     match block_type {
         "text" => {
             required_block_string(block, "text", message_index, block_index, block_type)?;

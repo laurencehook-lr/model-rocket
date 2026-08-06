@@ -110,6 +110,12 @@ async fn main() -> Result<(), BridgeError> {
                 BridgeError::unavailable(format!("cannot write canonical route: {error}"))
             })
         }
+        Some(command) if command == OsStr::new("codex-native-sha256") => {
+            reject_trailing_arguments(&mut arguments, "codex-native-sha256")?;
+            writeln!(io::stdout().lock(), "{}", product::CODEX_NATIVE_SHA256).map_err(|error| {
+                BridgeError::unavailable(format!("cannot write native Codex digest: {error}"))
+            })
+        }
         Some(command) if command == OsStr::new("launcher-settings") => {
             let bridge_bin = required_argument(&mut arguments, "bridge executable")?;
             let base_url = required_argument(&mut arguments, "bridge base URL")?;
@@ -129,11 +135,11 @@ async fn main() -> Result<(), BridgeError> {
             )
         }
         Some(command) => Err(BridgeError::configuration(format!(
-            "unknown command {}; expected preflight, serve, validate-settings, validate-claude, guard-settings-change, launcher-contract, launcher-settings, worker-config, or canonical-route",
+            "unknown command {}; expected preflight, serve, validate-settings, validate-claude, guard-settings-change, launcher-contract, launcher-settings, worker-config, canonical-route, or codex-native-sha256",
             command.to_string_lossy()
         ))),
         None => Err(BridgeError::configuration(
-            "missing command; expected preflight, serve, validate-settings, validate-claude, guard-settings-change, launcher-contract, launcher-settings, worker-config, or canonical-route",
+            "missing command; expected preflight, serve, validate-settings, validate-claude, guard-settings-change, launcher-contract, launcher-settings, worker-config, canonical-route, or codex-native-sha256",
         )),
     }
 }

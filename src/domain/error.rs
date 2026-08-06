@@ -45,7 +45,9 @@ impl fmt::Display for BridgeError {
             Self::Authentication => formatter.write_str("authentication failed"),
             Self::InvalidRequest(message) => write!(formatter, "invalid request: {message}"),
             Self::Unsupported(message) => write!(formatter, "unsupported request: {message}"),
-            Self::PayloadTooLarge => formatter.write_str("request body exceeds 8 MiB"),
+            Self::PayloadTooLarge => {
+                formatter.write_str("request body exceeds the configured limit")
+            }
             Self::AppServerUnavailable(message) => {
                 write!(formatter, "App Server unavailable: {message}")
             }

@@ -1,36 +1,6 @@
 use std::sync::Arc;
 
-/// The real model identifier accepted by a model provider.
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
-pub struct CodexModelId(Arc<str>);
-
-impl CodexModelId {
-    #[must_use]
-    pub fn new(value: impl Into<Arc<str>>) -> Self {
-        Self(value.into())
-    }
-
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-/// The route identifier visible to Claude Code.
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
-pub struct ClaudeModelId(Arc<str>);
-
-impl ClaudeModelId {
-    #[must_use]
-    pub fn new(value: impl Into<Arc<str>>) -> Self {
-        Self(value.into())
-    }
-
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
+use super::identifiers::{ClaudeModelId, CodexModelId};
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub enum ReasoningEffort {

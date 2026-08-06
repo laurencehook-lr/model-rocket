@@ -10,12 +10,21 @@ fn supplied_worker_uses_gpt_in_a_worktree() -> Result<(), Box<dyn std::error::Er
     let mut encoded = Vec::new();
     model_rocket::product::write_worker_config(config.catalogue(), &mut encoded)?;
     let worker = String::from_utf8(encoded)?;
+    let worker_model = worker
+        .lines()
+        .find_map(|line| line.strip_prefix("model: "))
+        .ok_or("worker model missing")?;
+    let route = config
+        .catalogue()
+        .route_for(worker_model)
+        .ok_or("worker model is not a configured route")?;
 
     assert!(worker.contains("name: gpt-worktree-worker\n"));
-    assert!(worker.contains(&format!(
-        "model: {}\n",
+    assert_eq!(
+        worker_model,
         config.catalogue().canonical_route().claude_model.as_str()
-    )));
+    );
+    assert!(route.codex_model.as_str().starts_with("gpt-"));
     assert!(worker.contains("isolation: worktree\n"));
     Ok(())
 }

@@ -68,10 +68,6 @@ if [[ "${ANTHROPIC_CUSTOM_MODEL_OPTION:-}" != "anthropic-model-rocket-gpt-5.6-so
   echo "Claude did not receive the canonical GPT custom model" >&2
   exit 78
 fi
-if [[ -n "${CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY:-}" ]]; then
-  echo "Claude received unsupported gateway model discovery" >&2
-  exit 86
-fi
 if [[ "${CLAUDE_CODE_MAX_CONTEXT_TOKENS:-}" != "272000" ]]; then
   echo "Claude did not receive the GPT context window" >&2
   exit 80

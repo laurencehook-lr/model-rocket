@@ -154,7 +154,7 @@ if len(sys.argv) == 3 and sys.argv[1] == "validate-claude":
         digest = hashlib.sha256(claude_handle.read()).hexdigest()
     expected = os.environ.get(
         "MODEL_ROCKET_TEST_CLAUDE_SHA256",
-        "2fccb13b36969fd07b3ca1788c813f52749cc62024b50072a484bedff8ca4fa6",
+        "05d117bf8a34403faa57b73c6e68c11a2ccb5add172cd72cfb46a55af88d621a",
     )
     if digest != expected:
         sys.stderr.write("configuration error: Claude Code executable digest changed\n")
@@ -194,9 +194,13 @@ forbidden = (
     "GITHUB_TOKEN",
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",
+    "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY",
+    "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST",
+    "CLAUDE_CODE_USE_GATEWAY",
     "CLAUDE_CODE_USE_BEDROCK",
     "CLAUDE_CODE_USE_VERTEX",
     "CLAUDE_CODE_USE_FOUNDRY",
+    "CLAUDE_CODE_USE_MANTLE",
     "LAUNCHER_PROOF_FILE",
     "MODEL_ROCKET_BRIDGE_BIN",
 )

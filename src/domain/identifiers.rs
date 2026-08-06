@@ -44,6 +44,8 @@ string_identifier!(RequestedModelId);
 string_identifier!(ClaudeSessionId);
 string_identifier!(ToolUseId);
 string_identifier!(ClaudeToolName);
+string_identifier!(CodexModelId);
+string_identifier!(ClaudeModelId);
 
 #[cfg(test)]
 mod tests {

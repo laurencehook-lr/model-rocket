@@ -224,15 +224,17 @@ fn routing_settings_encode_dynamic_routes_and_minimum_context()
         .get("availableModels")
         .and_then(Value::as_array)
         .ok_or("availableModels missing")?;
-    assert!(
-        available
-            .iter()
-            .any(|value| value == "anthropic-model-rocket-gpt-large-high")
-    );
-    assert!(
-        available
-            .iter()
-            .any(|value| value == "anthropic-model-rocket-gpt-small-low")
+    assert_eq!(
+        available,
+        &[
+            "fable",
+            "opus",
+            "sonnet",
+            "haiku",
+            "anthropic-model-rocket-gpt-large-high",
+            "anthropic-model-rocket-gpt-small-low",
+        ]
+        .map(Value::from)
     );
     assert_eq!(
         settings

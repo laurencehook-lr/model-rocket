@@ -1,43 +1,11 @@
 #!/usr/bin/env python3
-import json
-import sys
+from fake_codex_overflow_fatal import run
 
 
-if sys.argv[1:] == ["--version"]:
-    print("codex-cli 0.146.0")
-    sys.exit(0)
-
-
-def send(message):
-    sys.stdout.write(json.dumps(message, separators=(",", ":")) + "\n")
-    sys.stdout.flush()
-
-
-for raw_line in sys.stdin:
-    message = json.loads(raw_line)
-    method = message.get("method")
-    request_id = message.get("id")
-    if method == "initialize":
-        send({"id": request_id, "result": {"userAgent": "fake-overflow-error-interrupted"}})
-    elif method == "initialized":
-        continue
-    elif method == "account/read":
-        send({"id": request_id, "result": {"account": {"type": "chatgpt"}}})
-    elif method == "model/list":
-        send({"id": request_id, "result": {"data": [{"id": "gpt-5.6-sol", "model": "gpt-5.6-sol"}], "nextCursor": None}})
-    elif method == "thread/start":
-        send({"id": request_id, "result": {"thread": {"id": "thread_error_interrupt"}}})
-    elif method == "turn/start":
-        send({"id": request_id, "result": {"turn": {"id": "turn_error_interrupt"}}})
-        send({"method": "item/agentMessage/delta", "params": {"delta": "éstreamed beyond limit", "itemId": "item_error_interrupt", "threadId": "thread_error_interrupt", "turnId": "turn_error_interrupt"}})
-    elif method == "turn/interrupt":
-        params = message.get("params", {})
-        if params.get("threadId") != "thread_error_interrupt":
-            raise RuntimeError("turn/interrupt used the wrong thread ID")
-        if params.get("turnId") != "turn_error_interrupt":
-            raise RuntimeError("turn/interrupt used the wrong turn ID")
-        send({"id": request_id, "result": {}})
-        send({"method": "error", "params": {"error": {"message": "fatal provider error after interrupt"}, "threadId": "thread_error_interrupt", "turnId": "turn_error_interrupt", "willRetry": False}})
-        send({"method": "turn/completed", "params": {"threadId": "thread_error_interrupt", "turn": {"id": "turn_error_interrupt", "status": "interrupted", "items": []}}})
-    else:
-        send({"id": request_id, "error": {"code": -32601, "message": "unknown method"}})
+run(
+    user_agent="fake-overflow-error-interrupted",
+    thread_id="thread_error_interrupt",
+    turn_id="turn_error_interrupt",
+    error_message="fatal provider error after interrupt",
+    terminal_status="interrupted",
+)

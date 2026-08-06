@@ -55,6 +55,30 @@ impl Drop for FixtureCopy {
     }
 }
 
+struct TemporaryCatalogue(PathBuf);
+
+impl TemporaryCatalogue {
+    fn create(contents: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let path = std::env::temp_dir().join(format!(
+            "model-rocket-two-model-preflight-{}.json",
+            uuid::Uuid::now_v7()
+        ));
+        let catalogue = Self(path);
+        fs::write(catalogue.path(), contents)?;
+        Ok(catalogue)
+    }
+
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for TemporaryCatalogue {
+    fn drop(&mut self) {
+        let _removed = fs::remove_file(&self.0);
+    }
+}
+
 #[tokio::test]
 async fn preflight_accepts_managed_chatgpt_and_exact_model()
 -> Result<(), Box<dyn std::error::Error>> {
@@ -217,12 +241,7 @@ fn restricted_model_catalog_exposes_no_codex_tools() -> Result<(), Box<dyn std::
 #[tokio::test]
 async fn explicit_preflight_checks_every_configured_model_and_fails_as_one_unit()
 -> Result<(), Box<dyn std::error::Error>> {
-    let catalogue_path = std::env::temp_dir().join(format!(
-        "model-rocket-two-model-preflight-{}.json",
-        uuid::Uuid::now_v7()
-    ));
-    fs::write(
-        &catalogue_path,
+    let catalogue = TemporaryCatalogue::create(
         r#"{
           "schema_version": 1,
           "canonical_route": "anthropic-model-rocket-gpt-5.6-sol-high",
@@ -237,9 +256,8 @@ async fn explicit_preflight_checks_every_configured_model_and_fails_as_one_unit(
         }"#,
     )?;
     let config =
-        PreflightConfig::test_fixture(&fixture("fake_codex_discovery.py"), &catalogue_path)?;
+        PreflightConfig::test_fixture(&fixture("fake_codex_discovery.py"), catalogue.path())?;
     let result = bootstrap::preflight(&config).await;
-    fs::remove_file(catalogue_path)?;
     let error = result
         .err()
         .ok_or("unavailable configured model was accepted")?;

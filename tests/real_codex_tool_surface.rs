@@ -239,6 +239,11 @@ async fn real_codex_production_adapter_preserves_every_route_policy_on_the_wire(
     let config = PreflightConfig::test_fixture_from_env()?;
     let routes = config.catalogue().routes();
     let captured_requests = capture_outbound_requests(routes).await?;
+    assert_eq!(
+        captured_requests.len(),
+        routes.len(),
+        "every configured route must produce exactly one captured request"
+    );
     for (route, captured) in routes.iter().zip(captured_requests) {
         let body = request_json(&captured)?;
         assert_eq!(

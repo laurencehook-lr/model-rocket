@@ -1,5 +1,30 @@
 use std::{fs, os::unix::fs::PermissionsExt, path::Path, process::Command};
 
+struct TemporaryDirectory(std::path::PathBuf);
+
+impl TemporaryDirectory {
+    fn create(label: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let path = std::env::temp_dir().join(format!(
+            "model-rocket-{label}-{}-{}",
+            std::process::id(),
+            uuid::Uuid::now_v7()
+        ));
+        let directory = Self(path);
+        fs::create_dir_all(directory.path())?;
+        Ok(directory)
+    }
+
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for TemporaryDirectory {
+    fn drop(&mut self) {
+        let _removed = fs::remove_dir_all(&self.0);
+    }
+}
+
 const HOSTILE_PROJECT_SETTINGS: &str = r#"{
   "apiKeyHelper": "/tmp/hostile-api-key-helper",
   "availableModels": ["hostile-model"],
@@ -89,6 +114,7 @@ fn launcher_isolates_bridge_and_claude_environments() -> Result<(), Box<dyn std:
     let output = Command::new(root.join("scripts/model-rocket"))
         .current_dir(&caller_directory)
         .env("HOME", &launcher_home)
+        .env("CLAUDE_CONFIG_DIR", &launcher_home)
         .env("MODEL_ROCKET_CLAUDE_BIN", launcher_bin.join("claude"))
         .env("MODEL_ROCKET_CODEX_BIN", fixtures.join("fake_codex.py"))
         .env("MODEL_ROCKET_CONFIG", root.join("config/model-routes.json"))
@@ -173,6 +199,7 @@ fn assert_launch_files_removed(evidence: &str) -> Result<(), Box<dyn std::error:
 #[test]
 fn launcher_rejects_caller_routing_options() -> Result<(), Box<dyn std::error::Error>> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let isolated_home = TemporaryDirectory::create("routing-options-home")?;
     for argument in [
         "--settings=hostile.json",
         "--setting-sources=user",
@@ -184,6 +211,8 @@ fn launcher_rejects_caller_routing_options() -> Result<(), Box<dyn std::error::E
     ] {
         let output = Command::new(root.join("scripts/model-rocket"))
             .current_dir(root)
+            .env("HOME", isolated_home.path())
+            .env("CLAUDE_CONFIG_DIR", isolated_home.path())
             .arg(argument)
             .output()?;
 
@@ -196,6 +225,8 @@ fn launcher_rejects_caller_routing_options() -> Result<(), Box<dyn std::error::E
 
     let output = Command::new(root.join("scripts/model-rocket"))
         .current_dir(root)
+        .env("HOME", isolated_home.path())
+        .env("CLAUDE_CONFIG_DIR", isolated_home.path())
         .args(["--fallback-model", "sonnet"])
         .output()?;
     assert!(!output.status.success());
@@ -209,8 +240,11 @@ fn launcher_rejects_caller_routing_options() -> Result<(), Box<dyn std::error::E
 #[test]
 fn launcher_rejects_relative_claude_binary_path() -> Result<(), Box<dyn std::error::Error>> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let isolated_home = TemporaryDirectory::create("relative-claude-home")?;
     let output = Command::new(root.join("scripts/model-rocket"))
         .current_dir(root)
+        .env("HOME", isolated_home.path())
+        .env("CLAUDE_CONFIG_DIR", isolated_home.path())
         .env(
             "MODEL_ROCKET_BRIDGE_BIN",
             root.join("tests/fixtures/fake_bridge_env.py"),
@@ -231,8 +265,11 @@ fn launcher_rejects_relative_claude_binary_path() -> Result<(), Box<dyn std::err
 fn launcher_rejects_relative_codex_binary_path() -> Result<(), Box<dyn std::error::Error>> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let fixtures = root.join("tests/fixtures");
+    let isolated_home = TemporaryDirectory::create("relative-codex-home")?;
     let output = Command::new(root.join("scripts/model-rocket"))
         .current_dir(root)
+        .env("HOME", isolated_home.path())
+        .env("CLAUDE_CONFIG_DIR", isolated_home.path())
         .env(
             "MODEL_ROCKET_BRIDGE_BIN",
             root.join("tests/fixtures/fake_bridge_env.py"),
@@ -271,6 +308,7 @@ fn launcher_revalidates_claude_after_version_probe_before_launch()
     let output = Command::new(root.join("scripts/model-rocket"))
         .current_dir(root)
         .env("HOME", &temporary_home)
+        .env("CLAUDE_CONFIG_DIR", &temporary_home)
         .env(
             "MODEL_ROCKET_BRIDGE_BIN",
             fixtures.join("fake_bridge_env.py"),
@@ -291,6 +329,7 @@ fn launcher_revalidates_claude_after_version_probe_before_launch()
 fn launcher_rejects_lower_model_overrides() -> Result<(), Box<dyn std::error::Error>> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let fixtures = root.join("tests/fixtures");
+    let isolated_home = TemporaryDirectory::create("model-overrides-home")?;
     let caller_directory = std::env::temp_dir().join(format!(
         "model-rocket-model-overrides-{}-{}",
         std::process::id(),
@@ -306,6 +345,8 @@ fn launcher_rejects_lower_model_overrides() -> Result<(), Box<dyn std::error::Er
     let canonical_settings_path = settings_path.canonicalize()?;
     let output = Command::new(root.join("scripts/model-rocket"))
         .current_dir(&caller_directory)
+        .env("HOME", isolated_home.path())
+        .env("CLAUDE_CONFIG_DIR", isolated_home.path())
         .env(
             "MODEL_ROCKET_BRIDGE_BIN",
             fixtures.join("fake_bridge_env.py"),
@@ -383,6 +424,7 @@ fn assert_catalogue_preflight_blocks_claude(
     let output = Command::new(root.join("scripts/model-rocket"))
         .current_dir(&caller_directory)
         .env("HOME", &temporary_home)
+        .env("CLAUDE_CONFIG_DIR", &temporary_home)
         .env(
             "MODEL_ROCKET_BRIDGE_BIN",
             fixtures.join("fake_bridge_env.py"),

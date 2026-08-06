@@ -40,7 +40,7 @@ fn transcript_preserves_text_and_tool_order() -> Result<(), Box<dyn std::error::
 #[test]
 fn supported_tool_cache_metadata_is_dropped_at_the_domain_boundary()
 -> Result<(), Box<dyn std::error::Error>> {
-    let request = serde_json::from_value::<MessagesRequest>(serde_json::json!({
+    let request_value = serde_json::json!({
         "model": "anthropic-model-rocket-gpt-5.6-sol-normal-high",
         "max_tokens": 100,
         "messages": [{"role": "user", "content": "What is the weather?"}],
@@ -50,7 +50,12 @@ fn supported_tool_cache_metadata_is_dropped_at_the_domain_boundary()
             "input_schema": {"type": "object"},
             "cache_control": {"type": "ephemeral", "ttl": "5m"}
         }]
-    }))?;
+    });
+    assert_eq!(
+        request_value.pointer("/tools/0/cache_control"),
+        Some(&serde_json::json!({"type": "ephemeral", "ttl": "5m"}))
+    );
+    let request = serde_json::from_value::<MessagesRequest>(request_value)?;
     let execution = request.execute_message(
         ClaudeSessionId::from("claude-session"),
         ModelRoute {
@@ -65,9 +70,14 @@ fn supported_tool_cache_metadata_is_dropped_at_the_domain_boundary()
 
     let tools = execution.tools().as_slice();
     assert_eq!(tools.len(), 1);
+    let tool = tools
+        .first()
+        .ok_or_else(|| std::io::Error::other("translated tool missing"))?;
+    assert_eq!(tool.name().as_str(), "weather");
+    assert_eq!(tool.description().as_str(), "Get weather");
     assert_eq!(
-        tools.first().map(|tool| tool.name().as_str()),
-        Some("weather")
+        serde_json::from_str::<serde_json::Value>(tool.input_schema().as_str())?,
+        serde_json::json!({"type": "object"})
     );
     Ok(())
 }

@@ -46,6 +46,9 @@ Model Rocket currently pins these exact releases:
 Supported targets are macOS and glibc-based Linux on ARM64 or x86-64.
 Windows and musl-based Linux are not supported in this edition.
 
+The Anthropic subscription session must expose Model Rocket's default Claude model, currently `claude-fable-5`.
+The ChatGPT subscription session must expose every model listed in `models`, currently `gpt-5.6-sol`.
+
 ### 1. Install and sign in to the vendor CLIs
 
 Install the official native [Claude Code][claude-setup] release.
@@ -168,6 +171,22 @@ The strict versioned file defines:
 The checked-in [default catalogue](config/model-routes.json) is the complete schema example.
 Edit the installed catalogue, add a model and one or more routes, then restart `claude-gpt`.
 No Model Rocket recompile is needed for a compatible model exposed by the pinned Codex App Server.
+
+Catalogue identifiers and policies are deliberately narrow:
+
+- Model IDs start with `gpt-`.
+- Route IDs start with `anthropic-model-rocket-`.
+- IDs contain only lowercase ASCII letters, digits, hyphens, underscores, or dots.
+- `delivery` is `standard` or `fast`.
+- `reasoning` is `low` or `high`.
+- `context_tokens` is between `1` and `4,000,000` and should come from trusted model documentation.
+
+Validate the installed catalogue and current account availability with its absolute path:
+
+```bash
+model_rocket_config="${XDG_CONFIG_HOME:-$HOME/.config}/model-rocket/model-routes.json"
+MODEL_ROCKET_CONFIG="$model_rocket_config" model-rocket-bridge preflight
+```
 
 Model Rocket validates the entire catalogue before Claude Code starts.
 It rejects unknown fields or schema versions, duplicate or unsafe IDs, dangling or unused models, invalid policy values, and implausible context windows.
@@ -295,6 +314,7 @@ The App Server and HTTP integration targets require the explicit `test-support` 
 
 Use `just preflight` to check the local ChatGPT account and every model in the checked-in catalogue.
 Issues and focused pull requests are welcome.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow, architecture rules, and pull-request expectations.
 
 Before publishing or approving a release, run one interactive `claude-gpt` session and verify this sequence:
 
